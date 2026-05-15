@@ -9,3 +9,9 @@ users.db
 instance/
 .pytest_cache/
 *.pem
+config.yaml
+.secret_key
+*.tar.gz
+*.txt
+error.log
+server_log.txt
