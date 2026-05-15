@@ -348,10 +348,29 @@ class BotController:
                 signal, price, ind_val = get_signal_by_strategy(ticker, strat_name)
 
                 if signal == 'BUY' and pos.shares == 0:
+                    # 1. AI에게 최종 승인 요청 (Gemini 3.1 Pro 활용)
+                    if self.gemini:
+                        is_approved, reason = self.gemini.ai_approve_trade(
+                            signal='BUY', 
+                            stock_name=pos.name, 
+                            ticker=ticker, 
+                            price=price, 
+                            strategy=strat_name, 
+                            indicator_val=ind_val, 
+                            hot_sectors=self.hot_sectors
+                        )
+                        
+                        # AI가 거절하면 매수하지 않고 로그를 남긴 후 다음 종목으로 넘어감
+                        if not is_approved:
+                            self.add_log(f"🚫 AI 매수 거부: [{pos.name}] - {reason}")
+                            continue 
+
+                    # 2. AI가 승인했을 때만 실제 주문 실행
                     if self.kis:
                         qty = int(pos.cash // price)
                         if qty > 0:
                             self.kis.buy_market_order(ticker, qty)
+                    
                     qty = pos.buy(price)
                     if qty > 0:
                         msg = f"📈 [{pos.name}] 매수 {qty}주 @ {price:,}원 [{strat_name} → {ind_val:.1f}]"
@@ -673,3 +692,11 @@ class BotManager:
 
 # 글로벌 매니저 인스턴스
 manager = BotManager()
+
+def update_mode(self, is_mock):
+        """봇을 멈추지 않고 실전/모의 모드만 즉시 전환합니다."""
+        self._is_mock = is_mock
+        if self.kis:
+            self.kis.is_mock = is_mock # KIS API 객체에 모드 전달
+            mode_name = "모의투자" if is_mock else "실전투자"
+            self.add_log(f"🔄 모드 실시간 전환: {mode_name} 모드로 중단 없이 실행합니다.")

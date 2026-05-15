@@ -9,4 +9,4 @@ python-telegram-bot
 pandas_datareader
 matplotlib
 flask-login
-google-generativeai
+google-genai
