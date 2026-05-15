@@ -26,6 +26,7 @@ CORE_TICKER    = "003850"
 CORE_NAME      = "보령"
 CORE_RATIO     = 0.30
 SATELLITE_RATIO = 0.70
+CORE_MIN_FLOOR_RATIO = 0.5 # 바닥 보호 물량 비율 (50%)
 
 class BotController:
     def __init__(self, user_id, kis_config=None, telegram_config=None, gemini_config=None, core_stocks=None, is_mock=True):
@@ -34,7 +35,7 @@ class BotController:
         self.thread       = None
         self.logs         = []
         self.num_satellites = 5
-        self._is_mock     = is_mock   # DB에서 읽은 사용자 설정값 (API 키 없어도 유지)
+        self._is_mock     = is_mock   # DB에서 읽은 사용자 설정값
         
         # 코어 종목 리스트 (JSON 파싱)
         try:
@@ -122,6 +123,16 @@ class BotController:
         print(f"[{t}] {msg}")
         if len(self.logs) > 100:
             self.logs.pop(0)
+
+    # ─── 실시간 모드 업데이트 (클래스 내부로 이동됨) ───
+    def update_mode(self, is_mock):
+        """봇을 멈추지 않고 실전/모의 모드만 즉시 전환합니다."""
+        self._is_mock = is_mock
+        if self.kis:
+            # KIS API 객체의 모드와 URL 정보를 실제 변경
+            self.kis.set_mode(is_mock) 
+            mode_name = "모의투자" if is_mock else "실전투자"
+            self.add_log(f"🔄 모드 실시간 전환: {mode_name} 모드로 중단 없이 실행합니다.")
 
     # ─── 초기화 ───
     def initialize_portfolio(self, total_cash):
@@ -348,7 +359,7 @@ class BotController:
                 signal, price, ind_val = get_signal_by_strategy(ticker, strat_name)
 
                 if signal == 'BUY' and pos.shares == 0:
-                    # 1. AI에게 최종 승인 요청 (Gemini 3.1 Pro 활용)
+                    # 1. AI에게 최종 승인 요청 (Gemini 활용)
                     if self.gemini:
                         is_approved, reason = self.gemini.ai_approve_trade(
                             signal='BUY', 
@@ -553,11 +564,11 @@ class BotController:
             # 복구 성공 시 schedule만 재등록
             self.add_log("📊 기존 포트폴리오로 매매를 재개합니다.")
 
-        # 장중 매매: 09:05 ~ 15:25, 5분마다
+        # 장중 매매: 5분마다
         schedule.every(5).minutes.do(self.trading_job)
         # 일일 시장 분석 리포트 (08:00)
         schedule.every().day.at("08:00").do(self.generate_daily_report)
-        # 데일리 위성 리밸런싱 (08:50)
+        # 데일리 위성 리밸런싱 (08:50) - 오타 수정됨 (monthly_rescreen -> _rescreen_satellites)
         schedule.every().day.at("08:50").do(self._rescreen_satellites)
 
         self.trading_job()  # 즉시 1회 실행
@@ -571,7 +582,7 @@ class BotController:
         today = datetime.today().strftime('%Y-%m-%d')
         if not self.daily_report or self.daily_report.get('date') != today:
             self.add_log("과거 리포트 감지. 오늘 날짜로 리포트를 재생성합니다...")
-            self.daily_report = None  # 일일 리포트 폐기
+            self.daily_report = None
             self.generate_daily_report()
 
         while self.is_running:
@@ -615,8 +626,6 @@ class BotController:
     def get_status(self):
         cores_data = []
         for core in self.core_positions:
-            # KIS API 현재가 조회 제거 (rate limit 초과 방지)
-            # 현재가는 잔고 조회(/api/kis_balance)를 통해서만 업데이트됨
             cp = getattr(core, '_last_price', 0) or 0
             core_value = core.shares * cp
             cores_data.append({
@@ -646,7 +655,7 @@ class BotController:
 
         return {
             "is_running":    self.is_running,
-            "is_mock":       self._is_mock,        # DB 저장값 기준 (키 없어도 올바르게 반환)
+            "is_mock":       self._is_mock,
             "has_keys":      self.kis is not None,
             "logs":          self.logs[-30:],
             "hot_sectors":   self.hot_sectors,
@@ -663,12 +672,11 @@ class BotManager:
     def get_bot(self, user_id, user_data=None):
         if user_id not in self.bots:
             if user_data:
-                # 사용자 데이터를 기반으로 새 봇 생성
                 kis_config = {
                     "app_key": user_data.get('kis_app_key'),
                     "app_secret": user_data.get('kis_app_secret'),
                     "account_no": user_data.get('kis_account_no'),
-                    "is_mock": bool(user_data.get('is_mock', 1)) # 기본 모의투자
+                    "is_mock": bool(user_data.get('is_mock', 1))
                 }
                 tele_config = {
                     "token": user_data.get('telegram_token'),
@@ -680,7 +688,7 @@ class BotManager:
                 self.bots[user_id] = BotController(
                     user_id, kis_config, tele_config, gemini_config,
                     core_stocks=user_data.get('core_stocks'),
-                    is_mock=bool(user_data.get('is_mock', 1))  # DB 설정값 명시적으로 전달
+                    is_mock=bool(user_data.get('is_mock', 1))
                 )
             else:
                 return None
@@ -692,11 +700,3 @@ class BotManager:
 
 # 글로벌 매니저 인스턴스
 manager = BotManager()
-
-def update_mode(self, is_mock):
-        """봇을 멈추지 않고 실전/모의 모드만 즉시 전환합니다."""
-        self._is_mock = is_mock
-        if self.kis:
-            self.kis.is_mock = is_mock # KIS API 객체에 모드 전달
-            mode_name = "모의투자" if is_mock else "실전투자"
-            self.add_log(f"🔄 모드 실시간 전환: {mode_name} 모드로 중단 없이 실행합니다.")

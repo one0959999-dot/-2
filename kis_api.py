@@ -2,6 +2,7 @@ import requests
 import json
 import pandas as pd
 from datetime import datetime, timedelta
+
 class KisApi:
     """한국투자증권 OpenAPI 연동을 위한 클래스입니다."""
     
@@ -10,12 +11,17 @@ class KisApi:
         self.app_secret = app_secret
         # 계좌번호 정규화: "44550923-01" → "4455092301" (하이픈 자동 제거)
         self.account_no = account_no.replace('-', '').strip() if account_no else ''
+        self.set_mode(is_mock) # 초기 모드 설정
+
+    def set_mode(self, is_mock: bool):
+        """실전/모의 모드를 변경하고 그에 맞는 URL과 토큰을 초기화합니다."""
         self.is_mock = is_mock
-        
         # 모의투자 및 실전투자 URL 구분
         self.base_url = "https://openapivts.koreainvestment.com:29443" if is_mock else "https://openapi.koreainvestment.com:9443"
-        self.access_token = None
+        self.access_token = None # 모드가 바뀌면 토큰은 반드시 새로 발급받아야 함
         self.token_expiry = None
+        print(f"[KIS] 모드 변경: {'모의투자' if is_mock else '실전투자'} (URL: {self.base_url})")
+
     def get_access_token(self):
         """API 사용을 위한 토큰 발급"""
         print("[KIS] 접속 토큰(Access Token) 발급을 요청합니다...")
@@ -231,7 +237,6 @@ class KisApi:
         if not self._ensure_token():
             return []
         
-        # 실전 전용 URL (모의투자에서도 시세 조회는 실전 URL 사용 가능하나, 여기선 base_url 통일)
         url = "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/search-stock-info"
         headers = {
             "content-type": "application/json; charset=utf-8",
@@ -263,7 +268,6 @@ class KisApi:
         except Exception as e:
             print(f"[KIS] 종목 검색 오류: {e}")
         return []
-
 
     def get_volume_rank(self, market_div="J", limit=30):
         """
@@ -313,5 +317,4 @@ class KisApi:
         return []
 
 if __name__ == '__main__':
-    # 테스트 코드
     pass

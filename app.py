@@ -5,6 +5,7 @@ from database import get_db_connection, verify_user, add_user, init_db, update_u
 import os
 import json
 from datetime import datetime, timedelta
+import threading
 
 app = Flask(__name__)
 
@@ -52,11 +53,8 @@ def load_user(user_id):
 @app.route('/')
 @login_required
 def index():
-    # 사용자의 DB 데이터에서 Gemini API 키 존재 여부 확인
     user_data = current_user.data
     gemini_enabled = bool(user_data.get('gemini_api_key') and user_data.get('gemini_api_key').strip())
-    
-    # 템플릿으로 gemini_enabled 변수를 명시적으로 전달
     return render_template('index.html', 
                            user=current_user, 
                            gemini_enabled=gemini_enabled,
@@ -93,7 +91,7 @@ def logout():
     logout_user()
     return redirect(url_for('login'))
 
-# --- API 경로 (로그인 필요) ---
+# --- API 경로 ---
 
 def get_current_bot():
     return manager.get_bot(current_user.id, current_user.data)
@@ -125,8 +123,13 @@ def search_stock():
     if not q:
         return jsonify({"results": []})
     
-    # [생략] MAJOR_STOCKS 데이터는 기존과 동일하게 유지
-    MAJOR_STOCKS = [("005930", "삼성전자"), ("000660", "SK하이닉스"), ("003850", "보령")] # 예시 단축
+    # 주요 종목 리스트 (필요 시 KIS API 검색 결과와 병합 가능)
+    MAJOR_STOCKS = [
+        ("005930", "삼성전자"), ("000660", "SK하이닉스"), ("003850", "보령"),
+        ("005380", "현대차"), ("035420", "NAVER"), ("035720", "카카오"),
+        ("068270", "셀트리온"), ("005490", "POSCO홀딩스"), ("207940", "삼성바이오로직스"),
+        ("051910", "LG화학"), ("000270", "기아"), ("012330", "현대모비스")
+    ]
     
     q_lower = q.lower()
     results = [{"ticker": t, "name": n} for t, n in MAJOR_STOCKS if q_lower in n.lower() or q in t]
@@ -141,7 +144,6 @@ def get_pnl():
 @app.route('/api/daily_report')
 @login_required
 def get_daily_report():
-    import threading
     bot = get_current_bot()
     if not bot or not bot.gemini:
         return jsonify({"status": "error", "message": "AI 설정이 필요합니다."})
@@ -150,7 +152,6 @@ def get_daily_report():
     if bot.daily_report and bot.daily_report.get('date') == today_str:
         return jsonify({"status": "success", "data": bot.daily_report})
     
-    # 리포트가 없거나 날짜가 지난 경우 재생성
     bot.daily_report = None
     threading.Thread(target=bot.generate_daily_report, daemon=True).start()
     return jsonify({"status": "waiting", "message": "📡 오늘 날짜 AI 분석 리포트를 생성 중입니다. 잠시만 기다려 주세요."})
@@ -172,36 +173,43 @@ def ai_chat():
 @app.route('/api/settings/keys', methods=['POST'])
 @login_required
 def set_keys():
+    """사용자 설정(API 키, 모드, 코어 종목) 업데이트"""
     data = request.json
     
-    # 데이터 정제 로직
+    # 코어 종목 텍스트를 리스트로 변환
     core_text = data.get('core_stocks', '')
-    core_list = [{"ticker": x.split(':')[0].strip(), "name": x.split(':')[1].strip()} 
-                 for x in core_text.split('\n') if ':' in x]
+    core_list = []
+    for line in core_text.split('\n'):
+        if ':' in line:
+            parts = line.split(':')
+            core_list.append({"ticker": parts[0].strip(), "name": parts[1].strip()})
     
     data['core_stocks'] = json.dumps(core_list)
-    new_is_mock = 1 if data.get('is_mock') else 0 # 새로운 모드 값
+    
+    # checkbox 값을 확실하게 1 또는 0으로 변환
+    new_is_mock = bool(data.get('is_mock'))
+    data['is_mock'] = 1 if new_is_mock else 0
     
     # DB 업데이트
     update_user_keys(current_user.id, data)
     
-    # 실행 중인 봇이 있을 경우 처리
+    # 실행 중인 봇의 실시간 모드 전환 처리
     if current_user.id in manager.bots:
         bot = manager.bots[current_user.id]
         
-        # 모드(is_mock)만 바뀐 것이라면 봇을 끄지 않고 내부 값만 변경
-        if bot._is_mock != bool(new_is_mock):
-            bot.update_mode(bool(new_is_mock)) 
+        # 모드(실전/모의)만 변경된 경우
+        if bot._is_mock != new_is_mock:
+            bot.update_mode(new_is_mock)
             return jsonify({"status": "success", "message": "모드가 실시간으로 전환되었습니다."})
         
-        # 만약 API 키 등 중요한 정보가 바뀌었다면 재시작
+        # API 키 등 중요 정보 변경 시에는 봇을 안전하게 중단시키고 인스턴스 제거 (다음 호출 시 재생성)
         bot.stop()
         del manager.bots[current_user.id]
         
     return jsonify({"status": "success"})
 
 def resume_bots():
-    """서버 시작 시 이전에 실행 중이었던 봇들을 복구합니다."""
+    """서버 시작 시 실행 중이었던 봇 복구"""
     print("🔄 서버 시작: 봇 상태를 복구하는 중...")
     from database import get_db_connection
     conn = get_db_connection()
@@ -221,4 +229,5 @@ def resume_bots():
 if __name__ == '__main__':
     init_db()
     resume_bots()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # debug=True로 변경하면 에러 발생 시 상세한 내용을 콘솔에서 볼 수 있습니다.
+    app.run(host='0.0.0.0', port=5000, debug=True)
