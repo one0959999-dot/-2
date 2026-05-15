@@ -445,7 +445,8 @@
             style="display:none; border: 1px solid rgba(16,185,129,0.3); background: rgba(16,185,129,0.05);">
             <h2 style="color:#10b981;">🟢 모의투자 모드</h2>
             <p style="color:#94a3b8; font-size:0.9rem; margin:0;">현재 모의투자 모드로 동작 중입니다. 실제 계좌와 연동하려면 우측 상단의 스위치를
-                <strong>실전</strong>으로 변경하세요.<br>실전 모드 전환 시 반드시 <strong>실전투자용 App Key/Secret</strong>을 설정에서 입력해야 합니다.</p>
+                <strong>실전</strong>으로 변경하세요.<br>실전 모드 전환 시 반드시 <strong>실전투자용 App Key/Secret</strong>을 설정에서 입력해야 합니다.
+            </p>
         </div>
 
         <div class="chart-card glass-card">
@@ -472,17 +473,26 @@
             <span class="close-modal" onclick="closeSettingsModal()">&times;</span>
             <h2 style="font-family:'Outfit',sans-serif; margin-bottom:0.5rem;">API 계좌 설정</h2>
             <p style="font-size:0.8rem; color:#94a3b8; margin-bottom:1.5rem;">한국투자증권 API 키와 텔레그램 정보를 입력하세요.</p>
-            <div class="settings-group">
-                <label>KIS APP KEY</label>
-                <input type="text" id="kisAppKey" value="{{ user.data.kis_app_key or '' }}">
+            <div class="settings-group"
+                style="border: 1px solid rgba(239, 68, 68, 0.3); padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+                <h3 style="color: #ef4444; font-size: 0.85rem; margin-bottom: 8px;">🔴 실전투자 API 설정</h3>
+                <label>App Key</label>
+                <input type="text" id="realAppKey" value="{{ user.data.real_app_key or '' }}">
+                <label>App Secret</label>
+                <input type="password" id="realAppSecret" value="{{ user.data.real_app_secret or '' }}">
+                <label>계좌번호</label>
+                <input type="text" id="realAccountNo" value="{{ user.data.real_account_no or '' }}">
             </div>
-            <div class="settings-group">
-                <label>KIS APP SECRET</label>
-                <input type="password" id="kisAppSecret" value="{{ user.data.kis_app_secret or '' }}">
-            </div>
-            <div class="settings-group">
-                <label>계좌번호 (예: 12345678-01)</label>
-                <input type="text" id="kisAccountNo" value="{{ user.data.kis_account_no or '' }}">
+
+            <div class="settings-group"
+                style="border: 1px solid rgba(16, 185, 129, 0.3); padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+                <h3 style="color: #10b981; font-size: 0.85rem; margin-bottom: 8px;">🟢 모의투자 API 설정</h3>
+                <label>App Key</label>
+                <input type="text" id="mockAppKey" value="{{ user.data.mock_app_key or '' }}">
+                <label>App Secret</label>
+                <input type="password" id="mockAppSecret" value="{{ user.data.mock_app_secret or '' }}">
+                <label>계좌번호</label>
+                <input type="text" id="mockAccountNo" value="{{ user.data.mock_account_no or '' }}">
             </div>
             <hr style="border:0; border-top:1px solid rgba(255,255,255,0.05); margin:1rem 0;">
             <div class="settings-group">

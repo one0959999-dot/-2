@@ -704,9 +704,14 @@ window.saveCoreStocks = async function () {
 window.saveAccountSettings = async function () {
     const isMock = document.getElementById('modeSwitch').checked ? 1 : 0;
     const data = {
-        kis_app_key: document.getElementById('kisAppKey').value,
-        kis_app_secret: document.getElementById('kisAppSecret').value,
-        kis_account_no: document.getElementById('kisAccountNo').value,
+        // 실전/모의 데이터 각각 수집
+        real_app_key: document.getElementById('realAppKey').value,
+        real_app_secret: document.getElementById('realAppSecret').value,
+        real_account_no: document.getElementById('realAccountNo').value,
+        mock_app_key: document.getElementById('mockAppKey').value,
+        mock_app_secret: document.getElementById('mockAppSecret').value,
+        mock_account_no: document.getElementById('mockAccountNo').value,
+
         telegram_token: document.getElementById('teleToken').value,
         telegram_chat_id: document.getElementById('teleChatId').value,
         gemini_api_key: document.getElementById('geminiApiKey').value,

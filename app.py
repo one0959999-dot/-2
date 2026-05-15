@@ -183,7 +183,6 @@ def set_mode():
 @login_required
 def set_keys():
     data = request.json
-    # 화면의 input ID와 DB 컬럼명을 매칭시킵니다.
     update_data = {
         'real_app_key': data.get('real_app_key'),
         'real_app_secret': data.get('real_app_secret'),
@@ -197,7 +196,17 @@ def set_keys():
         'core_stocks': data.get('core_stocks'),
         'is_mock': data.get('is_mock')
     }
+    
+    # 1. DB 업데이트
     update_user_keys(current_user.id, update_data)
+    
+    # 2. 기존 실행 중인 봇이 있다면 삭제하여 새 키 반영
+    if current_user.id in manager.bots:
+        manager.bots[current_user.id].stop()
+        del manager.bots[current_user.id]
+        
+    # 3. [중요] 성공 응답을 반드시 반환해야 "서버 통신 오류"가 사라집니다.
+    return jsonify({"status": "success"})
 
 if __name__ == '__main__':
     init_db()
