@@ -1,0 +1,15 @@
+[Unit]
+Description=Lassi Trading Bot Service
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/lassi_bot
+Environment="PATH=/home/ubuntu/lassi_bot/venv/bin"
+ExecStart=/home/ubuntu/lassi_bot/venv/bin/python app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

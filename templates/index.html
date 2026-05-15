@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>라씨 매매비서 봇 대시보드</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        .navbar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 1.2rem 2.5rem; background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 1.5rem;
+        }
+        .nav-user { display: flex; align-items: center; gap: 1.5rem; }
+        .btn-settings {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            color: white; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.9rem; transition: all 0.2s;
+        }
+        .btn-settings:hover { background: rgba(255,255,255,0.1); }
+        .btn-logout { color: #94a3b8; text-decoration: none; font-size: 0.85rem; }
+        .btn-logout:hover { color: #ef4444; }
+
+        /* 위성 수 조절 (버튼 위) */
+        .sat-controls {
+            display: flex; align-items: center; gap: 8px;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+            padding: 6px 12px; border-radius: 10px; margin-bottom: 8px;
+        }
+        .sat-controls span { font-size: 0.8rem; color: #94a3b8; }
+        .sat-controls .sat-count-val { font-weight: 700; color: white; font-size: 1rem; min-width: 20px; text-align: center; }
+        .sat-adj-btn {
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+            color: white; width: 24px; height: 24px; border-radius: 5px; cursor: pointer;
+            font-size: 1rem; display: flex; align-items: center; justify-content: center;
+        }
+        .sat-adj-btn:hover { background: rgba(255,255,255,0.18); }
+
+        /* 모달 공통 */
+        .modal {
+            display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); backdrop-filter: blur(5px);
+        }
+        .modal-content {
+            background: #1e293b; margin: 5% auto; padding: 2rem; border-radius: 20px;
+            width: 90%; max-width: 480px; border: 1px solid rgba(255,255,255,0.1); position: relative;
+        }
+        .close-modal { position: absolute; right: 1.2rem; top: 1.2rem; cursor: pointer; color: #94a3b8; font-size: 1.5rem; }
+        .settings-group { margin-bottom: 1.2rem; }
+        .settings-group label { display: block; margin-bottom: 0.4rem; font-size: 0.8rem; color: #94a3b8; }
+        .settings-group input {
+            width: 100%; padding: 0.7rem; background: #0f172a; border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; color: white; box-sizing: border-box;
+        }
+        .btn-save-keys {
+            width: 100%; padding: 0.9rem; background: #3b82f6; border: none; border-radius: 10px;
+            color: white; font-weight: 700; cursor: pointer; margin-top: 1rem;
+        }
+
+        /* 코어 검색 모달 전용 */
+        .core-search-box {
+            display: flex; gap: 8px; margin-bottom: 1rem;
+        }
+        .core-search-box input {
+            flex: 1; padding: 0.7rem; background: #0f172a; border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px; color: white; font-size: 0.9rem;
+        }
+        .core-search-box button {
+            padding: 0.7rem 1rem; background: #3b82f6; border: none; border-radius: 8px;
+            color: white; cursor: pointer; font-weight: 600;
+        }
+        .search-results { max-height: 200px; overflow-y: auto; margin-bottom: 1rem; }
+        .search-result-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0.6rem 0.8rem; border-radius: 8px; cursor: pointer;
+            transition: background 0.15s;
+        }
+        .search-result-item:hover { background: rgba(255,255,255,0.08); }
+        .search-result-item .stock-name { font-weight: 600; font-size: 0.9rem; }
+        .search-result-item .stock-code { font-size: 0.75rem; color: #94a3b8; }
+        .btn-add-core {
+            padding: 4px 10px; background: #10b981; border: none; border-radius: 6px;
+            color: white; font-size: 0.75rem; cursor: pointer; font-weight: 600;
+        }
+        .core-list { margin-bottom: 1rem; }
+        .core-list-title { font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.5rem; }
+        .core-tag {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981;
+            color: #10b981; padding: 4px 10px; border-radius: 20px; font-size: 0.82rem;
+            margin: 3px;
+        }
+        .core-tag .remove-core {
+            cursor: pointer; color: #ef4444; font-weight: 700; font-size: 0.9rem;
+        }
+        
+        /* Mode Toggle Switch */
+        .mode-toggle { display: flex; align-items: center; gap: 8px; margin-right: 15px; background: rgba(0,0,0,0.2); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); }
+        .mode-toggle span { font-size: 0.75rem; font-weight: 600; color: #64748b; transition: 0.3s; }
+        .switch { position: relative; display: inline-block; width: 36px; height: 20px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ef4444; transition: .4s; border-radius: 20px; }
+        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #10b981; }
+        input:checked + .slider:before { transform: translateX(16px); }
+        .mode-active { color: #f8fafc !important; }
+    </style>
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob1"></div>
+        <div class="blob blob2"></div>
+        <div class="blob blob3"></div>
+    </div>
+
+    <nav class="navbar">
+        <div class="nav-logo">
+            <span style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; background: linear-gradient(135deg, #60a5fa, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Trading Bot</span>
+        </div>
+        <div class="nav-user">
+            <div class="mode-toggle">
+                <span id="label-real" class="{% if user.data.is_mock == 0 %}mode-active{% endif %}">실전</span>
+                <label class="switch">
+                    <input type="checkbox" id="modeSwitch" onchange="toggleMode()" {% if user.data.is_mock != 0 %}checked{% endif %}>
+                    <span class="slider"></span>
+                </label>
+                <span id="label-mock" class="{% if user.data.is_mock != 0 %}mode-active{% endif %}">모의</span>
+            </div>
+            <span style="font-size: 0.9rem; font-weight: 600; margin-right: 10px;">👤 {{ user.username }}</span>
+            <button class="btn-settings" onclick="openReportModal()" style="margin-right: 8px;">📜 오늘의 리포트</button>
+            <button class="btn-settings" onclick="openSettingsModal()">계좌 설정</button>
+            <a href="/logout" class="btn-logout">로그아웃</a>
+        </div>
+    </nav>
+
+    <div class="dashboard-container">
+
+        <!-- ═══ HEADER ═══ -->
+        <header>
+            <div class="title-area">
+                <h1>Trading Bot</h1>
+                <p>AI Automated Trading Assistant</p>
+                <div id="hot-sectors" class="hot-sectors">🔥 강세 섹터: 분석 대기중...</div>
+            </div>
+            <div class="header-right">
+                <!-- Mini Log Panel -->
+                <div class="mini-log glass-card" id="mini-log">
+                    <div class="mini-log-entry muted">봇을 시작하면 로그가 표시됩니다...</div>
+                </div>
+                <!-- 위성 수 조절 (버튼 위) -->
+                <div class="sat-controls">
+                    <span>📡 위성</span>
+                    <button class="sat-adj-btn" onclick="adjustSat(-1)">−</button>
+                    <span class="sat-count-val" id="sat-num-display">5</span>
+                    <button class="sat-adj-btn" onclick="adjustSat(1)">+</button>
+                    <span>종목</span>
+                </div>
+                <!-- Toggle Button -->
+                <button id="btn-toggle" class="btn-toggle btn-stopped" title="클릭하여 봇 시작/정지">
+                    <span class="toggle-dot"></span>
+                    <span id="toggle-label">Stopped</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- ═══ PORTFOLIO CARDS ═══ -->
+        <div class="grid-container" id="top-cards-container">
+            <div class="info-card glass-card">
+                <h3>📊 총 평가금액</h3>
+                <div class="card-value highlight" id="total-value">-</div>
+                <div class="card-subvalue" id="total-pnl">수익: -</div>
+            </div>
+            <!-- Core cards injected by script.js -->
+        </div>
+
+        <!-- ═══ SATELLITE TABLE ═══ -->
+        <div class="satellite-card glass-card">
+            <h2>📡 Satellite Positions</h2>
+            <table class="sat-table">
+                <thead>
+                    <tr>
+                        <th>종목</th>
+                        <th>적용 전략</th>
+                        <th>보유주식</th>
+                        <th>평가금액</th>
+                        <th>상태</th>
+                    </tr>
+                </thead>
+                <tbody id="sat-tbody">
+                    <tr><td colspan="5" class="muted-center">봇 시작 후 표시됩니다</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ═══ REAL ACCOUNT BALANCE (실전 모드에서만 표시) ═══ -->
+        <div id="real-account-section" class="satellite-card glass-card" style="display:none;">
+            <h2 style="display: flex; justify-content: space-between; align-items: center;">
+                <span>🏦 실제 한투증권 보유 현황
+                    <span style="font-size:0.7rem; background:#ef4444; color:white; padding:2px 8px; border-radius:10px; margin-left:8px; font-weight:600;">LIVE</span>
+                </span>
+                <span id="kis-total-summary" style="font-size: 0.9rem; color: #94a3b8; font-weight: normal;">조회 중...</span>
+            </h2>
+            <table class="sat-table">
+                <thead>
+                    <tr>
+                        <th>종목</th>
+                        <th>보유수량</th>
+                        <th>매입가</th>
+                        <th>현재가</th>
+                        <th>평가금액</th>
+                        <th>수익률</th>
+                    </tr>
+                </thead>
+                <tbody id="kis-tbody">
+                    <tr><td colspan="6" class="muted-center">잔고 조회 중...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ═══ MOCK MODE NOTICE (모의 모드에서만 표시) ═══ -->
+        <div id="mock-notice-section" class="satellite-card glass-card" style="display:none; border: 1px solid rgba(16,185,129,0.3); background: rgba(16,185,129,0.05);">
+            <h2 style="color:#10b981;">🟢 모의투자 모드</h2>
+            <p style="color:#94a3b8; font-size:0.9rem; margin:0;">현재 모의투자 모드로 동작 중입니다. 실제 계좌와 연동하려면 우측 상단의 스위치를 <strong>실전</strong>으로 변경하세요.<br>실전 모드 전환 시 반드시 <strong>실전투자용 App Key/Secret</strong>을 설정에서 입력해야 합니다.</p>
+        </div>
+
+        <!-- ═══ DAILY P&L CHART ═══ -->
+        <div class="chart-card glass-card">
+            <div class="chart-header" style="flex-wrap: wrap;">
+                <h2>📈 일별 실현 손익</h2>
+                <div class="pnl-summaries" style="display: flex; gap: 15px;">
+                    <span class="chart-subtitle" id="chart-monthly-pnl">이번달: -</span>
+                    <span class="chart-subtitle" id="chart-yearly-pnl">올해: -</span>
+                    <span class="chart-subtitle" id="chart-total-pnl" style="color: var(--accent-green);">누적: -</span>
+                </div>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="pnl-chart"></canvas>
+                <div id="chart-empty" class="chart-empty">
+                    <div class="chart-empty-icon">📉📈</div>
+                    <p>거래 체결 후 손익 그래프가 표시됩니다</p>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /dashboard-container -->
+
+    <!-- ─── API 계좌 설정 모달 ─── -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeSettingsModal()">&times;</span>
+            <h2 style="font-family:'Outfit',sans-serif; margin-bottom:0.5rem;">API 계좌 설정</h2>
+            <p style="font-size:0.8rem; color:#94a3b8; margin-bottom:1.5rem;">한국투자증권 API 키와 텔레그램 정보를 입력하세요.</p>
+            <div class="settings-group">
+                <label>KIS APP KEY</label>
+                <input type="text" id="kisAppKey" value="{{ user.data.kis_app_key or '' }}">
+            </div>
+            <div class="settings-group">
+                <label>KIS APP SECRET</label>
+                <input type="password" id="kisAppSecret" value="{{ user.data.kis_app_secret or '' }}">
+            </div>
+            <div class="settings-group">
+                <label>계좌번호 (예: 12345678-01)</label>
+                <input type="text" id="kisAccountNo" value="{{ user.data.kis_account_no or '' }}">
+            </div>
+            <hr style="border:0; border-top:1px solid rgba(255,255,255,0.05); margin:1rem 0;">
+            <div class="settings-group">
+                <label>텔레그램 봇 토큰</label>
+                <input type="text" id="teleToken" value="{{ user.data.telegram_token or '' }}">
+            </div>
+            <div class="settings-group">
+                <label>텔레그램 Chat ID</label>
+                <input type="text" id="teleChatId" value="{{ user.data.telegram_chat_id or '' }}">
+            </div>
+            <div class="settings-group">
+                <label>Google Gemini API Key</label>
+                <input type="password" id="geminiApiKey" value="{{ user.data.gemini_api_key or '' }}" placeholder="AI 분석용 (선택사항)">
+            </div>
+            <button class="btn-save-keys" onclick="saveAccountSettings()">API 설정 저장</button>
+        </div>
+    </div>
+
+    <!-- ─── 코어 종목 검색 & 변경 모달 ─── -->
+    <div id="coreModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeCoreModal()">&times;</span>
+            <h2 style="font-family:'Outfit',sans-serif; margin-bottom:0.5rem;">💎 코어 종목 설정</h2>
+            <p style="font-size:0.8rem; color:#94a3b8; margin-bottom:1.2rem;">장기 보유할 코어 주식을 검색해서 추가하세요.</p>
+
+            <div class="core-search-box">
+                <input type="text" id="coreSearchInput" placeholder="종목명 또는 종목코드 입력..." onkeydown="if(event.key==='Enter') searchCoreStock()">
+                <button onclick="searchCoreStock()">검색</button>
+            </div>
+            <div class="search-results" id="coreSearchResults"></div>
+
+            <div class="core-list">
+                <div class="core-list-title">현재 코어 종목 <span style="color:#94a3b8; font-size:0.7rem;">(비우면 기본값: 보령+AI선정주)</span></div>
+                <div id="coreTagList"></div>
+            </div>
+
+            <button class="btn-save-keys" onclick="saveCoreStocks()" style="background:#10b981;">코어 종목 적용 및 재시작</button>
+        </div>
+    </div>
+
+    <!-- ─── 전략 설명 팝업 모달 ─── -->
+    <div id="strategyModal" class="modal">
+        <div class="modal-content" style="max-width: 500px; text-align: center; padding: 2rem;">
+            <span class="close-modal" onclick="closeStrategyModal()">&times;</span>
+            <h2 id="strat-title" style="font-family:'Outfit',sans-serif; margin-bottom:1rem; color: #a78bfa;">전략 이름</h2>
+            
+            <canvas id="strat-canvas" width="400" height="180" style="width:100%; border-radius:12px; background: rgba(0,0,0,0.4); margin-bottom:1rem; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);"></canvas>
+            
+            <div style="background: rgba(167, 139, 250, 0.1); border: 1px solid rgba(167, 139, 250, 0.3); padding: 1.2rem; border-radius: 12px; margin-bottom: 1.5rem;">
+                <p id="strat-desc" style="font-size:0.95rem; line-height: 1.6; color: #f8fafc; margin: 0; word-break: keep-all;">전략에 대한 상세 설명이 표시됩니다.</p>
+            </div>
+            <button class="btn-save-keys" onclick="closeStrategyModal()">닫기</button>
+        </div>
+    </div>
+
+    <!-- ─── 일일 시장 분석 리포트 모달 ─── -->
+    <div id="reportModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close-modal" onclick="closeReportModal()">&times;</span>
+            <h2 style="margin-top:0; font-size: 1.5rem; color: var(--accent-blue);">📜 일일 시장 분석 리포트</h2>
+            <div id="report-content" style="margin-top: 1rem; color: #cbd5e1; font-size: 0.95rem; line-height: 1.6; max-height: 60vh; overflow-y: auto; padding-right: 10px;">
+                로딩 중...
+            </div>
+            <div style="margin-top: 1.5rem; display: flex; justify-content: space-between; align-items: center;">
+                <button onclick="hideReportToday()" style="background: rgba(255,255,255,0.1); border: none; color: #94a3b8; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">
+                    오늘 하루 다시 보지 않기
+                </button>
+                <button onclick="closeReportModal()" style="background: var(--accent-blue); border: none; color: white; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                    닫기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+    <!-- ─── AI 채팅 플로팅 버튼 ─── -->
+    <button id="ai-chat-fab" onclick="toggleAiChat()" title="라씨 AI와 대화하기">
+        🤖
+        <span class="fab-badge" id="ai-new-badge">!</span>
+    </button>
+
+    <!-- ─── AI 채팅 패널 ─── -->
+    <div id="ai-chat-panel">
+        <!-- Header -->
+        <div class="chat-header">
+            <div class="chat-avatar">🤖</div>
+            <div class="chat-header-info">
+                <div class="chat-header-title">
+                    라씨 AI
+                    <span class="chat-status-dot"></span>
+                </div>
+                <div class="chat-header-sub">시장 · 차트 · 재무제표 분석 전문</div>
+            </div>
+            <div class="chat-header-actions">
+                <button class="chat-icon-btn" onclick="resetAiChat()" title="대화 초기화">↺</button>
+                <button class="chat-icon-btn" onclick="toggleAiChat()" title="닫기">✕</button>
+            </div>
+        </div>
+
+        <!-- Quick chips -->
+        <div class="chat-chips" id="chat-chips">
+            <button class="chat-chip" onclick="sendChip('오늘 시장 상황 분석해줘')">📈 시장 분석</button>
+            <button class="chat-chip" onclick="sendChip('내 포트폴리오 분석해줘')">💼 포트폴리오</button>
+            <button class="chat-chip" onclick="sendChip('삼성전자 차트 분석해줘')">📊 차트 분석</button>
+            <button class="chat-chip" onclick="sendChip('삼성전자 재무제표 분석해줘')">💰 재무 분석</button>
+            <button class="chat-chip" onclick="sendChip('지금 어떤 섹터가 강세야?')">🔥 강세 섹터</button>
+            <button class="chat-chip" onclick="sendChip('RSI 전략 설명해줘')">📐 전략 설명</button>
+        </div>
+
+        <!-- Messages -->
+        <div class="chat-messages" id="chat-messages">
+            <div class="chat-msg ai">
+                <div class="chat-bubble">
+                    안녕하세요! 저는 <strong>라씨 AI</strong>입니다 🤖<br><br>
+                    아래 기능들을 도와드릴 수 있습니다:<br>
+                    • 📈 <strong>시장 분석</strong> — 지수 동향, 수급, 섹터 흐름<br>
+                    • 📊 <strong>차트 분석</strong> — RSI, MACD, 이동평균 등<br>
+                    • 💰 <strong>재무제표 분석</strong> — PER, ROE, 성장성 지표<br><br>
+                    위 버튼을 누르거나 직접 질문해보세요!
+                </div>
+                <span class="chat-msg-time">라씨 AI</span>
+            </div>
+        </div>
+
+        <!-- Input -->
+        <div class="chat-input-area">
+            <textarea id="ai-chat-input"
+                placeholder="질문을 입력하세요... (Shift+Enter 줄바꿈)"
+                rows="1"
+                onkeydown="handleChatKey(event)"
+                oninput="autoResizeTextarea(this)"></textarea>
+            <button id="ai-chat-send" onclick="sendAiMessage()" title="전송">➤</button>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,12 @@
+flask
+pykrx
+requests
+pandas
+numpy
+schedule
+pyyaml
+python-telegram-bot
+pandas_datareader
+matplotlib
+flask-login
+google-generativeai
