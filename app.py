@@ -196,16 +196,11 @@ def set_keys():
         'core_stocks': data.get('core_stocks'),
         'is_mock': data.get('is_mock')
     }
-    
-    # 1. DB 업데이트
+
+    # 1. 데이터 저장
     update_user_keys(current_user.id, update_data)
-    
-    # 2. 기존 실행 중인 봇이 있다면 중지하고 삭제 (새 키 적용을 위해)
-    if current_user.id in manager.bots:
-        manager.bots[current_user.id].stop()
-        del manager.bots[current_user.id]
-        
-    # 3. [핵심] 성공 응답 반환 (이 줄이 있어야 통신 오류가 발생하지 않습니다)
+
+    # 2. [추가] 브라우저에게 "성공했다"고 대답해줌
     return jsonify({"status": "success"})
 
 if __name__ == '__main__':
