@@ -32,7 +32,8 @@ class KisApi:
             "appkey": self.app_key,
             "appsecret": self.app_secret
         }
-        res = requests.post(url, headers=headers, data=json.dumps(body))
+        # 💡 timeout=5 추가: 5초 이상 무응답 시 무한대기 방지
+        res = requests.post(url, headers=headers, data=json.dumps(body), timeout=5)
         
         if res.status_code == 200:
             self.access_token = res.json().get('access_token')
@@ -78,18 +79,23 @@ class KisApi:
             "fid_cond_mrkt_div_code": "J",
             "fid_input_iscd": stock_code
         }
-        res = requests.get(url, headers=headers, params=params)
-        
-        if res.status_code == 200:
-            data = res.json()
-            if data['rt_cd'] == '0':
-                price = int(data['output']['stck_prpr'])
-                return price
+        try:
+            # 💡 timeout=3 추가: 현재가 조회는 즉각 응답해야 하므로 3초 대기
+            res = requests.get(url, headers=headers, params=params, timeout=3)
+            if res.status_code == 200:
+                data = res.json()
+                if data['rt_cd'] == '0':
+                    price = int(data['output']['stck_prpr'])
+                    return price
+                else:
+                    print(f"[KIS] 현재가 조회 오류: {data['msg1']}")
+                    return None
             else:
-                print(f"[KIS] 현재가 조회 오류: {data['msg1']}")
+                print(f"[KIS] 현재가 조회 통신 실패: {res.text}")
                 return None
-        else:
-            print(f"[KIS] 현재가 조회 통신 실패: {res.text}")
+        except Exception as e:
+            # 💡 통신 지연 에러 발생 시 프로그램이 터지지 않도록 예외 처리
+            print(f"[KIS] 현재가 조회 통신 시간 초과/오류: {e}")
             return None
 
     def _place_order(self, stock_code: str, qty: int, side: str):
@@ -121,31 +127,37 @@ class KisApi:
             "ORD_UNPR":       "0",    # 시장가는 0
         }
 
-        res = requests.post(
-            url,
-            headers=self._order_headers(tr_id),
-            data=json.dumps(body)
-        )
+        try:
+            # 💡 timeout=5 추가
+            res = requests.post(
+                url,
+                headers=self._order_headers(tr_id),
+                data=json.dumps(body),
+                timeout=5
+            )
 
-        if res.status_code == 200:
-            data = res.json()
-            if data.get('rt_cd') == '0':
-                odno = data['output'].get('ODNO', '-')
-                label = '매수' if side == 'BUY' else '매도'
-                print(f"[KIS] {label} 주문 완료 | {stock_code} {qty}주 | 주문번호: {odno}")
-                return data
+            if res.status_code == 200:
+                data = res.json()
+                if data.get('rt_cd') == '0':
+                    odno = data['output'].get('ODNO', '-')
+                    label = '매수' if side == 'BUY' else '매도'
+                    print(f"[KIS] {label} 주문 완료 | {stock_code} {qty}주 | 주문번호: {odno}")
+                    return data
+                else:
+                    msg_cd = data.get('msg_cd', '')
+                    print(f"[KIS] 주문 실패: {data.get('msg1', res.text)}")
+                    # 토큰 만료(EGW00123/EGW00121) → 재발급 후 1회 재시도
+                    if msg_cd in ('EGW00123', 'EGW00121'):
+                        print("[KIS] 토큰 만료 → 재발급 후 재시도")
+                        self.access_token = None
+                        self._ensure_token()
+                        return self._place_order(stock_code, qty, side)
+                    return None
             else:
-                msg_cd = data.get('msg_cd', '')
-                print(f"[KIS] 주문 실패: {data.get('msg1', res.text)}")
-                # 토큰 만료(EGW00123/EGW00121) → 재발급 후 1회 재시도
-                if msg_cd in ('EGW00123', 'EGW00121'):
-                    print("[KIS] 토큰 만료 → 재발급 후 재시도")
-                    self.access_token = None
-                    self._ensure_token()
-                    return self._place_order(stock_code, qty, side)
+                print(f"[KIS] 주문 통신 오류: {res.status_code} {res.text}")
                 return None
-        else:
-            print(f"[KIS] 주문 통신 오류: {res.status_code} {res.text}")
+        except Exception as e:
+            print(f"[KIS] 주문 요청 통신 시간 초과/오류: {e}")
             return None
         
     def buy_market_order(self, stock_code: str, qty: int):
@@ -193,44 +205,49 @@ class KisApi:
             "CTX_AREA_NK100": ""
         }
         
-        res = requests.get(url, headers=headers, params=params)
-        
-        if res.status_code == 200:
-            data = res.json()
-            if data.get('rt_cd') == '0':
-                stocks = data.get('output1', [])
-                summary = data.get('output2', [{}])[0]
-                
-                parsed_stocks = []
-                for s in stocks:
-                    if int(s.get('hldg_qty', 0)) > 0:
-                        parsed_stocks.append({
-                            "name": s.get('prdt_name', ''),
-                            "ticker": s.get('pdno', ''),
-                            "shares": int(s.get('hldg_qty', 0)),
-                            "purchase_price": float(s.get('pchs_avg_pric', 0)),
-                            "current_price": float(s.get('prpr', 0)),
-                            "value": float(s.get('evlu_amt', 0)),
-                            "profit_rt": float(s.get('evlu_pfls_rt', 0))
-                        })
-                
-                return {
-                    "stocks": parsed_stocks,
-                    "total_cash": float(summary.get('prvs_rcdl_excc_amt') or summary.get('dnca_tot_amt') or 0), # D+2 예수금
-                    "total_value": float(summary.get('tot_evlu_amt') or summary.get('evlu_amt_smtl_amt') or 0), # 총 평가금액
-                    "total_purchase": float(summary.get('pchs_amt_smtl_amt') or summary.get('tot_pchs_amt') or 0), # 매입금액 합계
-                }
+        try:
+            # 💡 timeout=5 추가
+            res = requests.get(url, headers=headers, params=params, timeout=5)
+            
+            if res.status_code == 200:
+                data = res.json()
+                if data.get('rt_cd') == '0':
+                    stocks = data.get('output1', [])
+                    summary = data.get('output2', [{}])[0]
+                    
+                    parsed_stocks = []
+                    for s in stocks:
+                        if int(s.get('hldg_qty', 0)) > 0:
+                            parsed_stocks.append({
+                                "name": s.get('prdt_name', ''),
+                                "ticker": s.get('pdno', ''),
+                                "shares": int(s.get('hldg_qty', 0)),
+                                "purchase_price": float(s.get('pchs_avg_pric', 0)),
+                                "current_price": float(s.get('prpr', 0)),
+                                "value": float(s.get('evlu_amt', 0)),
+                                "profit_rt": float(s.get('evlu_pfls_rt', 0))
+                            })
+                    
+                    return {
+                        "stocks": parsed_stocks,
+                        "total_cash": float(summary.get('prvs_rcdl_excc_amt') or summary.get('dnca_tot_amt') or 0), # D+2 예수금
+                        "total_value": float(summary.get('tot_evlu_amt') or summary.get('evlu_amt_smtl_amt') or 0), # 총 평가금액
+                        "total_purchase": float(summary.get('pchs_amt_smtl_amt') or summary.get('tot_pchs_amt') or 0), # 매입금액 합계
+                    }
+                else:
+                    msg1 = data.get('msg1', '')
+                    rt_cd = data.get('rt_cd', '')
+                    print(f"[KIS] 잔고 조회 실패: rt_cd={rt_cd}, msg={msg1}, data={data}")
+                    if msg1 in ('EGW00123', 'EGW00121'):
+                        self.access_token = None
+                        self._ensure_token()
+                        return self.get_account_balance()
             else:
-                msg1 = data.get('msg1', '')
-                rt_cd = data.get('rt_cd', '')
-                print(f"[KIS] 잔고 조회 실패: rt_cd={rt_cd}, msg={msg1}, data={data}")
-                if msg1 in ('EGW00123', 'EGW00121'):
-                    self.access_token = None
-                    self._ensure_token()
-                    return self.get_account_balance()
-        else:
-            print(f"[KIS] 잔고 조회 통신 오류: status={res.status_code}, text={res.text}")
-        return None
+                print(f"[KIS] 잔고 조회 통신 오류: status={res.status_code}, text={res.text}")
+            return None
+        except Exception as e:
+            print(f"[KIS] 잔고 조회 통신 시간 초과/오류: {e}")
+            return None
 
     def search_stock_name(self, query: str):
         """종목명 또는 코드로 KOSPI/KOSDAQ 종목 검색 (네이버 금융 실시간 초정밀 무적 검색 이식)"""

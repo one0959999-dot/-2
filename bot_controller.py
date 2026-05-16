@@ -111,11 +111,13 @@ class BotController:
                     for core in self.core_positions:
                         cp = self.kis.get_current_price(core.ticker)
                         if cp: core._last_price = cp
+                        time.sleep(0.05) # 💡 트래픽 폭주 방지 딜레이
                             
                     # 💡 list()로 감싸 스레드간 동시 접근으로 인한 딕셔너리 변형 에러(RuntimeError)를 방지합니다.
                     for ticker, pos in list(self.satellite_positions.items()):
                         sp = self.kis.get_current_price(ticker)
                         if sp: pos._last_price = sp
+                        time.sleep(0.05) # 💡 트래픽 폭주 방지 딜레이
             except Exception as e:
                 print(f"[_perpetual_sync_loop 에러] {e}")
             time.sleep(10)
@@ -679,115 +681,120 @@ class BotController:
 
     def _rescreen_satellites(self):
         """위성 종목 데일리 리밸런싱 (B+C 혼합형)"""
-        now = datetime.now()
-        # 동일 날짜에 중복 실행 방지
-        if getattr(self, 'last_screen_date', None) == now.date():
-            return
-            
-        self.add_log("📅 데일리 위성 리밸런싱 (추세 및 모멘텀 기반) 실행...")
-        keep_tickers = set()
-        freed_cash = 0
-        
-        from pykrx import stock as krx_stock
-        from datetime import timedelta
-        
-        # 1. 기존 종목 점검 (추세 우상향 또는 주도 섹터면 유지, 아니면 매도)
-        for ticker, pos in list(self.satellite_positions.items()):
-            if pos.shares == 0:
-                # 미매수 상태면 교체
-                freed_cash += pos.cash
-                del self.satellite_positions[ticker]
-                if ticker in self.satellite_strategies:
-                    del self.satellite_strategies[ticker]
-                self.add_log(f"🔄 위성 교체 (미매수 대기 제거): {pos.name}")
-                continue
+        try:
+            now = datetime.now()
+            # 동일 날짜에 중복 실행 방지
+            if getattr(self, 'last_screen_date', None) == now.date():
+                return
                 
-            price = self.kis.get_current_price(ticker) if self.kis else 0
+            self.add_log("📅 데일리 위성 리밸런싱 (추세 및 모멘텀 기반) 실행...")
+            keep_tickers = set()
+            freed_cash = 0
             
-            # 추세 및 모멘텀 확인
-            is_uptrend = False
-            try:
-                end_dt = now
-                start_dt = end_dt - timedelta(days=40)
-                df = krx_stock.get_market_ohlcv_by_date(start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d"), ticker)
-                if not df.empty and len(df) >= 20:
-                    c = df['종가']
-                    ema5 = c.ewm(span=5, adjust=False).mean().iloc[-1]
-                    ema20 = c.ewm(span=20, adjust=False).mean().iloc[-1]
-                    is_uptrend = ema5 > ema20
-            except:
-                is_uptrend = False
-
-            is_hot_sector = False
-            for s_info in self.satellite_info:
-                if s_info['ticker'] == ticker and s_info.get('sector') in self.hot_sectors:
-                    is_hot_sector = True
-                    break
-
-            if price and pos.avg_price > 0:
-                profit_rt = (price / pos.avg_price - 1) * 100
-                
-                if is_uptrend or is_hot_sector:
-                    keep_tickers.add(ticker)
-                    reason = "추세 우상향" if is_uptrend else "주도 섹터"
-                    self.add_log(f"🛡️ 위성 보존 ({reason}): {pos.name} ({profit_rt:+.2f}%)")
-                else:
-                    # 추세 꺾임 & 모멘텀 소진 시 매도
-                    if self.kis:
-                        self.kis.sell_market_order(ticker, pos.shares)
-                    qty, profit = pos.sell(price)
-                    
-                    # 매도 후 수익 발생 시 50% 코어 재투자
-                    if profit > 0 and self.core_positions:
-                        reinvest = profit * REINVEST_RATIO
-                        if pos.cash >= reinvest:
-                            pos.cash -= reinvest
-                            split = reinvest / len(self.core_positions)
-                            for core in self.core_positions:
-                                core.cash += split
-                            self.add_log(f"🔄 위성 수익 {profit:,.0f}원 중 {reinvest:,.0f}원 코어 편입")
-                            
+            from pykrx import stock as krx_stock
+            from datetime import timedelta
+            
+            # 1. 기존 종목 점검 (추세 우상향 또는 주도 섹터면 유지, 아니면 매도)
+            for ticker, pos in list(self.satellite_positions.items()):
+                if pos.shares == 0:
+                    # 미매수 상태면 교체
                     freed_cash += pos.cash
                     del self.satellite_positions[ticker]
                     if ticker in self.satellite_strategies:
                         del self.satellite_strategies[ticker]
-                    self.add_log(f"🔄 위성 매도 및 교체: {pos.name} ({profit_rt:+.2f}%)")
+                    self.add_log(f"🔄 위성 교체 (미매수 대기 제거): {pos.name}")
+                    continue
+                    
+                price = self.kis.get_current_price(ticker) if self.kis else 0
+                
+                # 추세 및 모멘텀 확인
+                is_uptrend = False
+                try:
+                    end_dt = now
+                    start_dt = end_dt - timedelta(days=40)
+                    df = krx_stock.get_market_ohlcv_by_date(start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d"), ticker)
+                    if not df.empty and len(df) >= 20:
+                        c = df['종가']
+                        ema5 = c.ewm(span=5, adjust=False).mean().iloc[-1]
+                        ema20 = c.ewm(span=20, adjust=False).mean().iloc[-1]
+                        is_uptrend = ema5 > ema20
+                except:
+                    is_uptrend = False
 
-        n_needed = self.num_satellites - len(keep_tickers)
-        if n_needed <= 0:
-            self.add_log("✅ 데일리 리밸런싱 완료: 전 종목 상승 추세 유지됨.")
+                is_hot_sector = False
+                for s_info in self.satellite_info:
+                    if s_info['ticker'] == ticker and s_info.get('sector') in self.hot_sectors:
+                        is_hot_sector = True
+                        break
+
+                if price and pos.avg_price > 0:
+                    profit_rt = (price / pos.avg_price - 1) * 100
+                    
+                    if is_uptrend or is_hot_sector:
+                        keep_tickers.add(ticker)
+                        reason = "추세 우상향" if is_uptrend else "주도 섹터"
+                        self.add_log(f"🛡️ 위성 보존 ({reason}): {pos.name} ({profit_rt:+.2f}%)")
+                    else:
+                        # 추세 꺾임 & 모멘텀 소진 시 매도
+                        if self.kis:
+                            self.kis.sell_market_order(ticker, pos.shares)
+                        qty, profit = pos.sell(price)
+                        
+                        # 매도 후 수익 발생 시 50% 코어 재투자
+                        if profit > 0 and self.core_positions:
+                            reinvest = profit * REINVEST_RATIO
+                            if pos.cash >= reinvest:
+                                pos.cash -= reinvest
+                                split = reinvest / len(self.core_positions)
+                                for core in self.core_positions:
+                                    core.cash += split
+                                self.add_log(f"🔄 위성 수익 {profit:,.0f}원 중 {reinvest:,.0f}원 코어 편입")
+                                
+                        freed_cash += pos.cash
+                        del self.satellite_positions[ticker]
+                        if ticker in self.satellite_strategies:
+                            del self.satellite_strategies[ticker]
+                        self.add_log(f"🔄 위성 매도 및 교체: {pos.name} ({profit_rt:+.2f}%)")
+
+            n_needed = self.num_satellites - len(keep_tickers)
+            if n_needed <= 0:
+                self.add_log("✅ 데일리 리밸런싱 완료: 전 종목 상승 추세 유지됨.")
+                self.last_screen_date = now.date()
+                self._save_state()
+                return
+
+            # 2. 빈 자리 개수만큼 새 종목 스크리닝
+            raw_info, self.hot_sectors = select_satellites(kis=self.kis, n=self.num_satellites + n_needed, verbose=False, gemini_client=self.gemini)
+            new_info = []
+            for c in raw_info:
+                if c['ticker'] not in keep_tickers:
+                    new_info.append(c)
+                    if len(new_info) == n_needed:
+                        break
+
+            # 3. 새 종목 편입 및 예산 할당
+            per_budget = freed_cash / n_needed if n_needed > 0 else 0
+            added_lines = []
+            for c in new_info:
+                self.satellite_positions[c['ticker']] = Position(c['ticker'], c['name'], per_budget)
+                self.satellite_strategies[c['ticker']] = c['strategy_name']
+                self.add_log(f"✨ 새 위성 편입: {c['name']} → [{c['strategy_name']}] {c['return_pct']:+.1f}%")
+                added_lines.append(f"  {c['name']} → [{c['strategy_name']}]")
+                
+            # satellite_info 업데이트
+            keep_info = [c for c in self.satellite_info if c['ticker'] in keep_tickers]
+            self.satellite_info = keep_info + new_info
+
+            msg = f"📅 데일리 위성 리밸런싱 완료! (유지: {len(keep_tickers)} / 교체: {n_needed})\n" + "\n".join(added_lines)
+            if self.telegram:
+                self.telegram.send_message(msg)
+                
             self.last_screen_date = now.date()
             self._save_state()
-            return
-
-        # 2. 빈 자리 개수만큼 새 종목 스크리닝
-        raw_info, self.hot_sectors = select_satellites(kis=self.kis, n=self.num_satellites + n_needed, verbose=False, gemini_client=self.gemini)
-        new_info = []
-        for c in raw_info:
-            if c['ticker'] not in keep_tickers:
-                new_info.append(c)
-                if len(new_info) == n_needed:
-                    break
-
-        # 3. 새 종목 편입 및 예산 할당
-        per_budget = freed_cash / n_needed if n_needed > 0 else 0
-        added_lines = []
-        for c in new_info:
-            self.satellite_positions[c['ticker']] = Position(c['ticker'], c['name'], per_budget)
-            self.satellite_strategies[c['ticker']] = c['strategy_name']
-            self.add_log(f"✨ 새 위성 편입: {c['name']} → [{c['strategy_name']}] {c['return_pct']:+.1f}%")
-            added_lines.append(f"  {c['name']} → [{c['strategy_name']}]")
             
-        # satellite_info 업데이트
-        keep_info = [c for c in self.satellite_info if c['ticker'] in keep_tickers]
-        self.satellite_info = keep_info + new_info
-
-        msg = f"📅 데일리 위성 리밸런싱 완료! (유지: {len(keep_tickers)} / 교체: {n_needed})\n" + "\n".join(added_lines)
-        if self.telegram:
-            self.telegram.send_message(msg)
-            
-        self.last_screen_date = now.date()
-        self._save_state()
+        except Exception as e:
+            # 💡 [핵심 수정] 외부 API 오류 발생 시 스레드가 죽지 않도록 예외 처리
+            self.add_log(f"🚨 위성 리밸런싱 중 오류 발생 (스케줄러 보호됨): {e}")
 
     def generate_daily_report(self):
         """11시 1차 매매 종료 후 시장 분석 리포트를 생성하고 텔레그램으로 실시간 알림을 보냅니다."""
