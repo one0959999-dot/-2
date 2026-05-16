@@ -18,24 +18,20 @@ def init_db():
     cursor = conn.cursor()
     
     # 1. 사용자 테이블 (users) 생성
-    # SQL 내부 주석은 -- 를 사용해야 합니다.
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         
-        -- 실전투자용 API 키 및 계좌번호
         real_app_key TEXT,
         real_app_secret TEXT,
         real_account_no TEXT,
         
-        -- 모의투자용 API 키 및 계좌번호
         mock_app_key TEXT,
         mock_app_secret TEXT,
         mock_account_no TEXT,
         
-        -- 기존 호환용 컬럼 (유지)
         kis_app_key TEXT,
         kis_app_secret TEXT,
         kis_account_no TEXT,
@@ -64,8 +60,6 @@ def init_db():
             pass 
 
     # 3. 봇 상태 테이블 (bot_states) - 실전/모의 장부 분리
-    # 💡 마이그레이션용 DROP 구문을 제거하여 서버 재시작 시 기존 데이터가 증발하는 현상을 방지합니다.
-    # 3. 봇 상태 테이블 (bot_states) - 실전/모의 장부 분리
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS bot_states (
         user_id INTEGER,
@@ -77,7 +71,7 @@ def init_db():
     )
     ''')
 
-    # 🟢 [여기에 새로 추가] 자가 학습용 매매 일지 및 AI 룰 테이블 🟢
+    # 4. 자가 학습용 매매 일지 및 AI 룰 테이블
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS trade_journal (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,14 +95,7 @@ def init_db():
     )
     ''')
     
-    # [추가] 서버가 새로 시작될 때, 비정상 종료로 인해 DB에 1(실행중)로 남아있던 좀비 상태를 0(정지)으로 클리어합니다.
-    cursor.execute('UPDATE users SET is_running = 0')
-    
-    conn.commit()
-    conn.close()
-    
-    # [추가] 서버가 새로 시작될 때, 비정상 종료로 인해 DB에 1(실행중)로 남아있던 좀비 상태를 0(정지)으로 클리어합니다.
-    # 이로써 사용자가 대시보드에서 직접 [시작] 버튼을 눌러야만 매매가 시작되도록 제어합니다.
+    # 💡 [버그 해결] 중복으로 들어가 있던 연결 종료(close) 구문을 삭제하고 한 번만 실행되도록 정리했습니다.
     cursor.execute('UPDATE users SET is_running = 0')
     
     conn.commit()
