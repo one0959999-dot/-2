@@ -1,9 +1,11 @@
 import json
 import time
+import os
 from google import genai
 from google.genai import types
 
-API_KEY = "AIzaSyCSRhPKoMsCDbbCpXsCFAnf_e7TPiyXycc"
+# 💡 직접 적는 대신, 컴퓨터(서버) 환경변수나 .env 파일에서 몰래 읽어옵니다.
+API_KEY = os.getenv("GEMINI_API_KEY") 
 client = genai.Client(api_key=API_KEY)
 
 print("📂 1단계: 로컬에서 데이터셋을 직접 읽어옵니다...")
