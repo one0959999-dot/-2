@@ -111,7 +111,9 @@ def toggle_bot():
         bot.stop()
         return jsonify({"status": "stopped"})
     else:
-        success = bot.start()
+        # DB에 저장된 사용자의 실제 투자 원금(initial_cash)을 안전하게 읽어와 봇을 시작하도록 변경합니다.
+        user_cash = current_user.data.get('initial_cash', 10000000)
+        success = bot.start(total_cash=user_cash)
         if success:
             return jsonify({"status": "started"})
         return jsonify({"status": "error", "message": "봇 시작 실패"}), 400
@@ -158,6 +160,22 @@ def ai_reset():
         return jsonify({"status": "success"})
     return jsonify({"status": "error"})
 
+@app.route('/api/search/stock')
+@login_required
+def search_stock():
+    """프론트엔드 종목 검색창 요청 처리 API (KIS API 연동)"""
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify({"results": []})
+        
+    bot = get_current_bot()
+    if not bot or not bot.kis:
+        return jsonify({"results": [], "message": "API 설정이 비어있습니다."})
+        
+    # kis_api.py에 정의된 search_stock_name 메서드를 사용하여 한국거래소 종목을 검색합니다.
+    results = bot.kis.search_stock_name(query)
+    return jsonify({"results": results})
+
 @app.route('/api/settings/mode', methods=['POST'])
 @login_required
 def set_mode():
@@ -175,7 +193,9 @@ def set_mode():
     # 2. 실행 중인 봇의 모드 즉시 변경
     bot = get_current_bot()
     if bot:
-        bot.update_mode(bool(is_mock))
+        # 사용자의 가설정 자산 원금(initial_cash)을 함께 인자로 전달하여 장부 초기화에 대응합니다.
+        user_cash = current_user.data.get('initial_cash', 10000000)
+        bot.update_mode(bool(is_mock), total_cash=user_cash)
         
     return jsonify({"status": "success", "is_mock": is_mock})
 
@@ -197,12 +217,36 @@ def set_keys():
         'is_mock': data.get('is_mock')
     }
 
-    # 1. 데이터 저장
+   # 1. 데이터 저장
     update_user_keys(current_user.id, update_data)
 
-    # 2. [추가] 브라우저에게 "성공했다"고 대답해줌
+    # [핵심 추가] 변경된 설정을 메모리에 구동 중인 봇 컨트롤러 인스턴스에도 즉시 동기화해 줍니다.
+    is_mock = int(data.get('is_mock', 1))
+    prefix = 'mock_' if is_mock else 'real_'
+    
+    bot = get_current_bot()
+    if bot:
+        bot.reload_api_keys(
+            kis_config={
+                "app_key": data.get(f'{prefix}app_key'),
+                "app_secret": data.get(f'{prefix}app_secret'),
+                "account_no": data.get(f'{prefix}account_no'),
+                "is_mock": bool(is_mock)
+            },
+            telegram_config={
+                "token": data.get('telegram_token'),
+                "chat_id": data.get('telegram_chat_id')
+            },
+            gemini_config={
+                "api_key": data.get('gemini_api_key')
+            },
+            core_stocks=data.get('core_stocks')
+        )
+
+    # 2. 브라우저에게 "성공했다"고 대답해줌
     return jsonify({"status": "success"})
 
 if __name__ == '__main__':
     init_db()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # debug=False 및 use_reloader=False로 설정하여 프로세스 이중 실행과 의도치 않은 자동 시작을 원천 차단합니다.
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)

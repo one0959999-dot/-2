@@ -124,15 +124,63 @@ class BotController:
         if len(self.logs) > 100:
             self.logs.pop(0)
 
-    # ─── 실시간 모드 업데이트 (클래스 내부로 이동됨) ───
-    def update_mode(self, is_mock):
-        """봇을 멈추지 않고 실전/모의 모드만 즉시 전환합니다."""
+    def reload_api_keys(self, kis_config, telegram_config, gemini_config, core_stocks):
+        """사용자가 웹에서 API 키를 수정했을 때, 실행 중인 봇 객체들에 실시간으로 새 키를 반영합니다."""
+        try:
+            self.user_core_stocks = json.loads(core_stocks) if core_stocks else []
+        except:
+            self.user_core_stocks = []
+
+        # KIS API 객체 갱신
+        if kis_config and kis_config.get('app_key'):
+            self.kis = KisApi(
+                app_key=kis_config.get('app_key', '').strip(),
+                app_secret=kis_config.get('app_secret', '').strip(),
+                account_no=kis_config.get('account_no', '').strip(),
+                is_mock=kis_config.get('is_mock', True)
+            )
+        else:
+            self.kis = None
+        
+        # 텔레그램 알림 객체 갱신
+        if telegram_config and telegram_config.get('token'):
+            self.telegram = TelegramNotifier(
+                token=telegram_config.get('token', '').strip(),
+                chat_id=telegram_config.get('chat_id', '').strip()
+            )
+        else:
+            self.telegram = None
+        
+        # 제미나이 AI 객체 갱신
+        if gemini_config and gemini_config.get('api_key'):
+            self.gemini = GeminiApi(api_key=gemini_config.get('api_key', '').strip())
+        else:
+            self.gemini = None
+            
+        self._init_dummy_cores()
+        self.add_log("🔑 변경된 API 키 및 계좌 설정이 시스템에 실시간 반영되었습니다.")
+
+    def update_mode(self, is_mock, total_cash=10000000):
+        """봇을 멈추지 않고 실전/모의 모드를 즉시 전환하며, 해당 모드의 독립 장부를 새로 로드합니다."""
+       
         self._is_mock = is_mock
         if self.kis:
-            # KIS API 객체의 모드와 URL 정보를 실제 변경
+            # KIS API 객체의 모드와 URL 정보를 먼저 변경합니다.
             self.kis.set_mode(is_mock) 
-            mode_name = "모의투자" if is_mock else "실전투자"
-            self.add_log(f"🔄 모드 실시간 전환: {mode_name} 모드로 중단 없이 실행합니다.")
+            
+        mode_name = "모의투자" if is_mock else "실전투자"
+        self.add_log(f"🔄 모드 실시간 전환: {mode_name} 자산 장부 데이터로 전면 교체합니다.")
+        
+        # [핵심 추가] 봇이 가동 중(Running) 상태라면 바뀐 모드의 장부 데이터를 DB에서 불러옵니다.
+        if self.is_running:
+            restored = self._restore_state()
+            if not restored:
+                self.add_log(f"ℹ️ {mode_name}의 기존 저장 상태가 없어 새로 포트폴리오를 구성합니다.")
+                self.initialize_portfolio(total_cash)
+        else:
+            # 봇이 정지(Stopped) 상태일 때도 대시보드 화면에 올바른 코어 종목 금액이 나오도록 동기화합니다.
+            self._init_dummy_cores()
+            self._restore_state()
 
     # ─── 초기화 ───
     def initialize_portfolio(self, total_cash):
@@ -241,17 +289,22 @@ class BotController:
                 "hot_sectors": self.hot_sectors,
                 "num_satellites": self.num_satellites,
                 "last_screen_month": getattr(self, 'last_screen_month', None),
+                # [핵심 추가] 파이썬 date 객체를 문자열로 안전하게 변환하여 저장합니다.
+                # 이를 통해 서버가 불시에 재시작되더라도 오늘 이미 실행한 위성 리밸런싱이 중복 작동하는 것을 완벽히 방지합니다.
+                "last_screen_date": self.last_screen_date.strftime('%Y-%m-%d') if getattr(self, 'last_screen_date', None) else None,
                 "daily_pnl": self.daily_pnl,
                 "daily_report": self.daily_report,
             }
-            save_portfolio_state(self.user_id, state)
+            # 데이터베이스 장부 분리를 위해 인자값에 self._is_mock을 정확히 추가해 줍니다.
+            save_portfolio_state(self.user_id, state, self._is_mock)
         except Exception as e:
             self.add_log(f"⚠️ 상태 저장 실패: {e}")
 
     def _restore_state(self):
         """DB에서 포트폴리오 상태 복구. 성공하면 True 반환."""
         try:
-            state = load_portfolio_state(self.user_id)
+            # 실전/모의 모드에 맞는 독자 장부를 불러오도록 self._is_mock 인자를 추가합니다.
+            state = load_portfolio_state(self.user_id, self._is_mock)
             if not state or not state.get("cores"):
                 return False
 
@@ -309,10 +362,67 @@ class BotController:
         now = datetime.now()
         self.add_log(f"--- 매매 신호 점검 ({now.strftime('%H:%M')}) ---")
 
+        # [핵심 리팩토링] 매 사이클마다 한투증권(KIS)의 실제 예수금과 보유 주식 데이터를 가져와 시스템 장부를 강제 동기화합니다.
+        # 이로 인해 수수료, 세금, 미체결 등으로 인한 장부 왜곡 및 예수금 부족으로 인한 주문 에러를 원천 차단합니다.
+        if self.kis:
+            try:
+                real_balance = self.kis.get_account_balance()
+                if real_balance and 'stocks' in real_balance:
+                    # 1. 실제 예수금(현금) 동기화 (기존 코어/위성 간 배분 비율을 유지하면서 세금/수수료 오차를 자동 정산)
+                    real_cash = float(real_balance.get('total_cash', 0))
+                    virtual_cash_total = sum(c.cash for c in self.core_positions) + sum(s.cash for s in self.satellite_positions.values())
+                    
+                    if real_cash > 0 and virtual_cash_total > 0:
+                        adjustment_ratio = real_cash / virtual_cash_total
+                        for core in self.core_positions:
+                            core.cash = round(core.cash * adjustment_ratio, 2)
+                        for sat in self.satellite_positions.values():
+                            sat.cash = round(sat.cash * adjustment_ratio, 2)
+                    elif real_cash > 0 and virtual_cash_total == 0:
+                        # 가상 장부상 현금이 0인데 실제 계좌에 현금이 남은 경우 균등 분배 초기화
+                        total_allocations = len(self.core_positions) + len(self.satellite_positions)
+                        split_cash = real_cash / total_allocations
+                        for core in self.core_positions:
+                            core.cash = split_cash
+                        for sat in self.satellite_positions.values():
+                            sat.cash = split_cash
+
+                    # 2. 실제 보유 주식 수(shares) 및 평균 매입단가(avg_price) 동기화
+                    # 장부를 먼저 0으로 클리어한 후 실제 증권사 데이터만 매칭 주입합니다.
+                    for core in self.core_positions:
+                        core.shares = 0
+                    for sat in self.satellite_positions.values():
+                        sat.shares = 0
+
+                    for real_stock in real_balance['stocks']:
+                        t = real_stock['ticker']
+                        q = int(real_stock['shares'])
+                        p = float(real_stock['purchase_price'])
+
+                        # 코어 종목 실제 수량 매칭
+                        for core in self.core_positions:
+                            if core.ticker == t:
+                                core.shares = q
+                                core.avg_price = p
+                                if core.floor_shares == 0 and q > 0:
+                                    core.floor_shares = max(1, int(q * CORE_MIN_FLOOR_RATIO))
+                                break
+
+                        # 위성 종목 실제 수량 매칭
+                        if t in self.satellite_positions:
+                            sat = self.satellite_positions[t]
+                            sat.shares = q
+                            sat.avg_price = p
+                            
+                    self.add_log("🔄 [잔고 동기화 완료] 실제 계좌의 실시간 자산 데이터가 가상 장부에 연동되었습니다.")
+            except Exception as e:
+                self.add_log(f"⚠️ [잔고 동기화 실패] 증권사 잔고 로드 실패 (안전을 위해 기존 데이터로 대치): {e}")
+
         # ── 코어 현재가 및 신호 점검 ──
         for core in self.core_positions:
             cp = self.kis.get_current_price(core.ticker) if self.kis else None
             if not cp: continue
+            core._last_price = cp  # [추가] 대시보드 웹 화면에 실시간 현재가가 정상 출력되도록 바인딩합니다.
             
             core_val = core.shares * cp
             self.add_log(
@@ -352,11 +462,13 @@ class BotController:
                 self.add_log(f"  [{core.name}] 점검 중 오류: {str(e)}")
 
 
-        # ── 위성 신호 점검 (종목별 최적 전략 적용) ──
+       # ── 위성 신호 점검 (종목별 최적 전략 적용) ──
         for ticker, pos in self.satellite_positions.items():
             try:
                 strat_name = self.satellite_strategies.get(ticker, 'RSI(9) 30/70')
                 signal, price, ind_val = get_signal_by_strategy(ticker, strat_name)
+                if price > 0:
+                    pos._last_price = price  # [추가] 대시보드 웹 화면에 위성 종목 현재가가 정상 출력되도록 바인딩합니다.
 
                 if signal == 'BUY' and pos.shares == 0:
                     # 1. AI에게 최종 승인 요청 (Gemini 활용)

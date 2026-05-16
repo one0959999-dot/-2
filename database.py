@@ -78,6 +78,10 @@ def init_db():
     except sqlite3.OperationalError:
         pass
     
+    # [추가] 서버가 새로 시작될 때, 비정상 종료로 인해 DB에 1(실행중)로 남아있던 좀비 상태를 0(정지)으로 클리어합니다.
+    # 이로써 사용자가 대시보드에서 직접 [시작] 버튼을 눌러야만 매매가 시작되도록 제어합니다.
+    cursor.execute('UPDATE users SET is_running = 0')
+    
     conn.commit()
     conn.close()
 
