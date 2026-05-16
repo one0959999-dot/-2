@@ -47,61 +47,17 @@ SYSTEM_PROMPT = """
 - 답변은 간결하고 실용적이어야 합니다."""
 
     # pyrefly: ignore [parse-error]
-    # pyrefly: ignore [parse-error]
-    def __init__(self, api_key):
+   def __init__(self, api_key):
         self.client = None
         self._conversation_history = []
         
         if api_key:
             self.client = genai.Client(api_key=api_key)
         
-        # 🧠 [수정 완료] 존재하지 않는 튜닝 모델 대신, 똑똑하고 빠른 '기본 모델'을 씁니다!
-        # 위에서 작성한 강력한 SYSTEM_PROMPT가 이 기본 모델의 뇌쇄포 역할을 할 것입니다.
+        # 무거운 실시간 파인튜닝 로직을 제거하고, 시스템 프롬프트가 주입된 
+        # 빠르고 안정적인 최신 기본 모델을 사용하여 뇌동매매와 서버 다운을 방지합니다.
         self.model_id = "gemini-2.5-flash"
-        
-        try:
-            # 1. 이미 학습된 모델이 있다면 재사용 (스피드UP!)
-            self.tuned_model = "gemini-3-pro-preview-12-15-preview"
-            
-            # 2. 학습 데이터셋 준비
-            data = types.Content(
-                role="user",
-                parts=[
-                    types.Part(
-                        file_data=types.FileData(
-                            mime_type="application/jsonl",
-                            file_uri="file://./bear_market_training.jsonl"
-                        )
-                    )
-                ]
-            )
-            
-            # 3. 모델 학습 요청 (최초 1회만 시간 소요, 이후 캐싱됨)
-            training_file = self.client.files.upload(file="./bear_market_training.jsonl")
-            config = types.GenerateContentConfig(
-                system_instruction=self.SYSTEM_PROMPT,
-                # pyrefly: ignore [unexpected-keyword]
-                training_files=[training_file.name],
-                temperature=0.1,  # 학습된 모델은 0.1로 낮춰 칼같이 분석
-                response_mime_type="application/json",
-                response_schema={
-                    "type": types.Schema.OBJECT,
-                    "properties": {
-                        "decision": {"type": types.Schema.STRING, "enum": ["CONFIRM", "REJECT", "HOLD"]},
-                        "reason": {"type": types.Schema.STRING}
-                    },
-                    "required": ["decision", "reason"]
-                }
-            )
-            
-            self.tuned_model = self.client.models.create_tuned_model(
-                config=config,
-                training_data=[data]
-            ).name
-        except Exception as e:
-            # 학습 데이터셋이 없거나 에러 발생 시, 기존 '기본 모델'로 자동 fallback
-            print(f"🧠 튜닝 모델 생성 실패(에러): {e} → 기본 모델로 자동 전환")
-            self.tuned_model = "gemini-2.5-flash"
+        self.tuned_model = "gemini-2.5-flash"
         """기본 응답 생성"""
         if not self.client:
             return "Gemini API 키가 설정되지 않았습니다."
@@ -119,6 +75,7 @@ SYSTEM_PROMPT = """
         except Exception as e:
             return f"Gemini 응답 생성 중 오류: {str(e)}"
 
+     # pyrefly: ignore [parse-error]
     def ai_select_satellites(self, candidates, hot_sectors, n):
         """스크리너가 추출한 후보 중 AI가 최종 n개를 선정 (AttributeError 해결)"""
         if not self.client:

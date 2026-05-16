@@ -460,20 +460,18 @@ class BotController:
 
         current_time_str = now.strftime('%H:%M')
         
-        # [수정] 한국 시장 통계상 수급과 거래량이 집중되어 승률이 가장 높은 '골든 타임'을 정의합니다.
+       # [수정] 한국 시장 통계상 수급과 거래량이 집중되어 승률이 가장 높은 '골든 타임'을 정의합니다.
         # - 장 초반 주도주 수급 타임 (09:01 ~ 11:00)
         # - 장 마감 직전 종가 형성 타임 (15:00 ~ 15:20)
         is_golden_hours = ("09:01" <= current_time_str <= "11:00") or ("15:00" <= current_time_str <= "15:20")
         
-        # 골든 타임이 아닐 때는 매매 연산을 건너뛰어 가짜 신호로 인한 뇌동매매와 손실을 원천 차단합니다.
+        # 골든 타임이 아닐 때는 신규 매수(BUY)만 제한하고, 보유 종목에 대한 매도(SELL) 및 손절 관리는 계속 감시합니다.
         if not is_golden_hours:
-            # 5분마다 로그가 너무 많이 쌓이는 것을 방지하기 위해 매 정시와 30분에만 안내 로그를 출력합니다.
             if now.minute % 30 == 0:
-                self.add_log(f"💤 현재 시간({current_time_str})은 횡보 가능성이 높은 구간입니다. 오신호 손절 방지를 위해 봇 매매 대기 중...")
-            return
-
-        # 골든 타임 진입 시 정상적으로 5분 주기 신호 탐색을 수행합니다.
-        self.add_log(f"--- 🎯 골든 타임 매매 신호 점검 ({current_time_str}) ---")
+                self.add_log(f"🕒 현재 시간({current_time_str})은 횡보 구간입니다. 신규 매수(BUY)는 중지하되 보유 종목 리스크 관리(SELL)는 유지합니다.")
+            # return으로 종료하지 않고 매도 감시를 위해 아래 루프를 계속 진행시킵니다.
+        else:
+            self.add_log(f"--- 🎯 골든 타임 매수/매도 전면 점검 ({current_time_str}) ---")
 
         # [핵심 리팩토링] 매 사이클마다 한투증권(KIS)의 실제 예수금과 보유 주식 데이터를 가져와 시스템 장부를 강제 동기화합니다.
         # ... (이하 기존 코드 동일) ...
@@ -605,6 +603,8 @@ class BotController:
 
 
        # ── 위성 신호 점검 (종목별 최적 전략 적용) ──
+        # ── 위성 신호 점검 (종목별 최적 전략 적용) ──
+        # ── 위성 신호 점검 (종목별 최적 전략 적용) ──
         for ticker, pos in self.satellite_positions.items():
             try:
                 strat_name = self.satellite_strategies.get(ticker, 'RSI(9) 30/70')
@@ -612,9 +612,26 @@ class BotController:
                 if price > 0:
                     pos._last_price = price  # [추가] 대시보드 웹 화면에 위성 종목 현재가가 정상 출력되도록 바인딩합니다.
 
+                # 💡 [AI 뇌 확장] 차트만 보는 것을 막기 위해 실시간 펀더멘털 데이터를 긁어와 AI에게 같이 넘겨줍니다.
+                financial_data = "재무 데이터 조회 불가"
+                try:
+                    from pykrx import stock as krx_stock
+                    from datetime import timedelta
+                    latest_date = krx_stock.get_business_days_dates(datetime.now() - timedelta(days=7), datetime.now())[-1]
+                    fund_df = krx_stock.get_market_fundamental_by_ticker(latest_date.strftime("%Y%m%d"), latest_date.strftime("%Y%m%d"), ticker)
+                    if not fund_df.empty:
+                        per = fund_df.loc[ticker, 'PER']
+                        pbr = fund_df.loc[ticker, 'PBR']
+                        financial_data = f"PER: {per:.2f}배, PBR: {pbr:.2f}배"
+                except Exception:
+                    pass
+
                 if signal == 'BUY' and pos.shares == 0:
+                    if not is_golden_hours:
+                        continue # 골든타임이 아닐 때는 매수(BUY) 금지
+
                     reason = "조건 충족 자동 매수"
-                    # 1. AI에게 과거 기록과 함께 최종 승인 요청
+                    # 1. AI에게 매수 권한 위임 (차트 보조지표 + 재무 데이터 융합)
                     if self.gemini:
                         recent_logs = get_recent_trades(self.user_id, ticker, limit=5)
                         custom_rules = load_ai_rules(self.user_id)
@@ -624,7 +641,7 @@ class BotController:
                             stock_name=pos.name, 
                             ticker=ticker, 
                             price=price, 
-                            strategy=strat_name, 
+                            strategy=f"{strat_name} | 실시간 재무상태: {financial_data}", 
                             indicator_val=ind_val, 
                             hot_sectors=self.hot_sectors,
                             recent_trades=recent_logs,
@@ -632,7 +649,7 @@ class BotController:
                         )
                         
                         if not is_approved:
-                            self.add_log(f"🚫 AI 매수 거부 (학습결과 반영): [{pos.name}] - {reason}")
+                            self.add_log(f"🚫 AI 매수 거절 (재무/차트/학습 융합 판단): [{pos.name}] - {reason}")
                             continue 
 
                     # 2. 승인 시 주문 실행
@@ -643,22 +660,43 @@ class BotController:
                     
                     qty = pos.buy(price)
                     if qty > 0:
-                        msg = f"📈 [{pos.name}] 매수 {qty}주 @ {price:,}원 [{strat_name} → {ind_val:.1f}]"
+                        msg = f"📈 [{pos.name}] AI 매수 승인: {qty}주 @ {price:,}원 [{strat_name} → {ind_val:.1f}]"
                         self.add_log(msg)
-                        # 🟢 [여기에 새로 추가] 매수 내역 DB 기록 🟢
                         log_trade_journal(self.user_id, ticker, pos.name, 'BUY', price, strat_name, reason)
                         if self.telegram:
                             self.telegram.send_message(msg)
 
                 elif signal == 'SELL' and pos.shares > 0:
+                    reason = "조건 충족 자동 매도"
+                    # 1. AI에게 매도(SELL) 권한까지 완전히 이양하여 조기 청산을 막고 수익 극대화를 유도
+                    if self.gemini:
+                        recent_logs = get_recent_trades(self.user_id, ticker, limit=5)
+                        custom_rules = load_ai_rules(self.user_id)
+                        
+                        is_approved, reason = self.gemini.ai_approve_trade(
+                            signal='SELL', 
+                            stock_name=pos.name, 
+                            ticker=ticker, 
+                            price=price, 
+                            strategy=f"{strat_name} | 실시간 재무상태: {financial_data}", 
+                            indicator_val=ind_val, 
+                            hot_sectors=self.hot_sectors,
+                            recent_trades=recent_logs,
+                            custom_rules=custom_rules
+                        )
+                        
+                        if not is_approved:
+                            self.add_log(f"✋ AI 매도 보류 (수익 극대화 홀딩 판단): [{pos.name}] - {reason}")
+                            continue
+
+                    # 2. AI가 하락 위험을 감지하여 털고 나가라고 승인했을 때만 매도 실행
                     if self.kis:
                         self.kis.sell_market_order(ticker, pos.shares)
                     qty, profit = pos.sell(price)
-                    msg = (f"📉 [{pos.name}] 매도 {qty}주 @ {price:,}원 "
+                    msg = (f"📉 [{pos.name}] AI 매도 승인: {qty}주 @ {price:,}원 "
                            f"| 손익: {profit:+,.0f}원 [{strat_name} → {ind_val:.1f}]")
                     self.add_log(msg)
-                    # 🟢 [여기에 새로 추가] 매도 내역(수익금 포함) DB 기록 🟢
-                    log_trade_journal(self.user_id, ticker, pos.name, 'SELL', price, strat_name, "수익/손절 청산 로직 발동", profit=profit)
+                    log_trade_journal(self.user_id, ticker, pos.name, 'SELL', price, strat_name, reason, profit=profit)
                     if self.telegram:
                         self.telegram.send_message(msg)
 
@@ -681,8 +719,10 @@ class BotController:
                             if self.telegram:
                                 self.telegram.send_message(msg_dist)
                 else:
-                    self.add_log(f"  [{pos.name}] HOLD [{strat_name} → {ind_val:.1f}]")
-
+                    # 매수/매도 조건이 아닐 때 HOLD 로그 
+                    pass 
+                    # 횡보장에서도 로그가 너무 많이 쌓이는 것을 막기 위해 HOLD 로그 출력 생략 또는 유지 가능
+                    # self.add_log(f"  [{pos.name}] HOLD [{strat_name} → {ind_val:.1f}]")
 
             except Exception as e:
                 self.add_log(f"⚠️ [{ticker}] 오류: {e}")
