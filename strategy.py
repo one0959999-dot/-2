@@ -9,6 +9,7 @@ strategy.py
 from pykrx import stock
 from datetime import datetime, timedelta
 import pandas as pd
+import numpy as np  # 💡 [필수 추가] CCI 등 고급 수학 지표 계산을 위한 numpy 라이브러리 추가
 
 CORE_TICKER        = "003850"
 CORE_NAME          = "보령"

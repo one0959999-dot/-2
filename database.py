@@ -187,7 +187,8 @@ def load_portfolio_state(user_id, is_mock):
     """실전/모의투자 모드에 맞춰 상태를 불러옵니다."""
     mode = 1 if is_mock else 0
     conn = get_db_connection()
-    row = conn.execute('SELECT state_json FROM bot_states WHERE user_id = ? AND 일 is_mock = ?', 
+    # 💡 '일' 이라는 오타를 삭제하여 SQL 에러를 방지했습니다.
+    row = conn.execute('SELECT state_json FROM bot_states WHERE user_id = ? AND is_mock = ?', 
                        (user_id, mode)).fetchone()
     conn.close()
     if row and row['state_json']:
