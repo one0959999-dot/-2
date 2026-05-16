@@ -445,6 +445,14 @@ class BotController:
             return
 
         now = datetime.now()
+        
+        # 🟢 [버그 해결] 토요일(5) 또는 일요일(6) 등 주말일 때는 주식 장이 열리지 않으므로 즉시 연산을 종료합니다.
+        # 이로 인해 주말에 서버를 몇 번을 껐다 켜도 유령 매수 신호나 텔레그램 오발송이 완벽하게 차단됩니다.
+        if now.weekday() >= 5:
+            if now.minute % 30 == 0:
+                self.add_log(f"💤 오늘은 주말 휴무일({now.strftime('%A')})입니다. 가짜 신호 방지를 위해 매매 감시를 중단하고 휴식합니다.")
+            return
+
         current_time_str = now.strftime('%H:%M')
         
         # [수정] 한국 시장 통계상 수급과 거래량이 집중되어 승률이 가장 높은 '골든 타임'을 정의합니다.
