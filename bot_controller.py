@@ -20,7 +20,7 @@ from gemini_api import GeminiApi
 from strategy import CorePosition, Position, get_rsi_signal, get_signal_by_strategy, REINVEST_RATIO
 from stock_screener import select_satellites, generate_daily_market_report
 from main import load_config
-from database import update_bot_status, save_portfolio_state, load_portfolio_state
+from database import update_bot_status, save_portfolio_state, load_portfolio_state, log_trade_journal, get_recent_trades, save_ai_rules, load_ai_rules
 
 CORE_TICKER    = "003850"
 CORE_NAME      = "보령"
@@ -611,8 +611,12 @@ class BotController:
                     pos._last_price = price  # [추가] 대시보드 웹 화면에 위성 종목 현재가가 정상 출력되도록 바인딩합니다.
 
                 if signal == 'BUY' and pos.shares == 0:
-                    # 1. AI에게 최종 승인 요청 (Gemini 활용)
+                    reason = "조건 충족 자동 매수"
+                    # 1. AI에게 과거 기록과 함께 최종 승인 요청
                     if self.gemini:
+                        recent_logs = get_recent_trades(self.user_id, ticker, limit=5)
+                        custom_rules = load_ai_rules(self.user_id)
+                        
                         is_approved, reason = self.gemini.ai_approve_trade(
                             signal='BUY', 
                             stock_name=pos.name, 
@@ -620,15 +624,16 @@ class BotController:
                             price=price, 
                             strategy=strat_name, 
                             indicator_val=ind_val, 
-                            hot_sectors=self.hot_sectors
+                            hot_sectors=self.hot_sectors,
+                            recent_trades=recent_logs,
+                            custom_rules=custom_rules
                         )
                         
-                        # AI가 거절하면 매수하지 않고 로그를 남긴 후 다음 종목으로 넘어감
                         if not is_approved:
-                            self.add_log(f"🚫 AI 매수 거부: [{pos.name}] - {reason}")
+                            self.add_log(f"🚫 AI 매수 거부 (학습결과 반영): [{pos.name}] - {reason}")
                             continue 
 
-                    # 2. AI가 승인했을 때만 실제 주문 실행
+                    # 2. 승인 시 주문 실행
                     if self.kis:
                         qty = int(pos.cash // price)
                         if qty > 0:
@@ -638,6 +643,8 @@ class BotController:
                     if qty > 0:
                         msg = f"📈 [{pos.name}] 매수 {qty}주 @ {price:,}원 [{strat_name} → {ind_val:.1f}]"
                         self.add_log(msg)
+                        # 🟢 [여기에 새로 추가] 매수 내역 DB 기록 🟢
+                        log_trade_journal(self.user_id, ticker, pos.name, 'BUY', price, strat_name, reason)
                         if self.telegram:
                             self.telegram.send_message(msg)
 
@@ -648,6 +655,8 @@ class BotController:
                     msg = (f"📉 [{pos.name}] 매도 {qty}주 @ {price:,}원 "
                            f"| 손익: {profit:+,.0f}원 [{strat_name} → {ind_val:.1f}]")
                     self.add_log(msg)
+                    # 🟢 [여기에 새로 추가] 매도 내역(수익금 포함) DB 기록 🟢
+                    log_trade_journal(self.user_id, ticker, pos.name, 'SELL', price, strat_name, "수익/손절 청산 로직 발동", profit=profit)
                     if self.telegram:
                         self.telegram.send_message(msg)
 
@@ -818,28 +827,55 @@ class BotController:
         except Exception as e:
             self.add_log(f"⚠️ 일일 리포트 생성 중 오류: {e}")
 
+    # 🟢 [여기에 새로 추가] 주간 자아성찰 함수 🟢
+    def _weekly_self_reflection(self):
+        """[AI 자가 학습] 일주일간의 매매 기록을 바탕으로 오답 노트를 작성하고 룰을 업데이트합니다."""
+        self.add_log("🧠 [AI 자아성찰] 한 주간의 매매 결과를 분석하여 새로운 투자 원칙을 수립합니다...")
+        
+        from database import get_db_connection
+        conn = get_db_connection()
+        rows = conn.execute('''
+            SELECT date(created_at) as date, stock_name, action, price, ai_reason, profit 
+            FROM trade_journal WHERE user_id = ? ORDER BY created_at DESC LIMIT 30
+        ''', (self.user_id,)).fetchall()
+        conn.close()
+
+        if not rows:
+            self.add_log("ℹ️ 이번 주 매매 기록이 없어 자아성찰을 건너뜁니다.")
+            return
+
+        history_lines = []
+        for r in rows:
+            p_str = f" | 손익: {r['profit']:,.0f}원" if r['action'] == 'SELL' else ""
+            history_lines.append(f"- {r['date']} | {r['stock_name']} | {r['action']} | 승인이유: {r['ai_reason']}{p_str}")
+        
+        history_text = "\n".join(history_lines)
+        
+        if self.gemini:
+            new_rules = self.gemini.generate_weekly_reflection(history_text)
+            if new_rules:
+                save_ai_rules(self.user_id, new_rules)
+                self.add_log(f"✨ [AI 진화 완료] 새로운 투자 원칙이 두뇌에 각인되었습니다:\n{new_rules}")
+                if self.telegram:
+                    self.telegram.send_message(f"🧠 [라씨 AI 자가 학습 완료]\n\n이번 주 오답노트를 바탕으로 새로운 매매 원칙을 세웠습니다:\n\n{new_rules}")
+
     # ─── 봇 시작/정지 ───
     def _run_loop(self, total_cash):
         import schedule
-        # 💡 전역 schedule 대신 각 봇마다 독립된 스케줄러 인스턴스를 생성하여 스케줄러가 꼬이는 버그를 원천 차단합니다.
         self.scheduler = schedule.Scheduler()
 
-        # 서버 재시작 시 기존 상태 복구 시도
         restored = self._restore_state()
         if not restored:
-            # 복구 실패 시에만 새로 초기화 (스크리닝 실행)
             self.initialize_portfolio(total_cash)
         else:
-            # 복구 성공 시 schedule만 재등록
             self.add_log("📊 기존 포트폴리오로 매매를 재개합니다.")
 
-        # 장중 매매: 5분마다 등록
         self.scheduler.every(5).minutes.do(self.trading_job)
-        # 일일 시장 분석 리포트 등록
         self.scheduler.every().day.at("11:00").do(self.generate_daily_report)
-        
-        # 데일리 위성 리밸런싱 등록
         self.scheduler.every().day.at("09:05").do(self._rescreen_satellites)
+        
+        # 🟢 [여기에 새로 추가] 매주 금요일 장 마감 후 성찰 스케줄 🟢
+        self.scheduler.every().friday.at("16:00").do(self._weekly_self_reflection)
 
         self.trading_job()  # 즉시 1회 실행
         

@@ -65,6 +65,7 @@ def init_db():
 
     # 3. 봇 상태 테이블 (bot_states) - 실전/모의 장부 분리
     # 💡 마이그레이션용 DROP 구문을 제거하여 서버 재시작 시 기존 데이터가 증발하는 현상을 방지합니다.
+    # 3. 봇 상태 테이블 (bot_states) - 실전/모의 장부 분리
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS bot_states (
         user_id INTEGER,
@@ -75,6 +76,36 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users (id)
     )
     ''')
+
+    # 🟢 [여기에 새로 추가] 자가 학습용 매매 일지 및 AI 룰 테이블 🟢
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS trade_journal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        ticker TEXT,
+        stock_name TEXT,
+        action TEXT,
+        price REAL,
+        strategy TEXT,
+        ai_reason TEXT,
+        profit REAL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ai_rules (
+        user_id INTEGER PRIMARY KEY,
+        rule_text TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # [추가] 서버가 새로 시작될 때, 비정상 종료로 인해 DB에 1(실행중)로 남아있던 좀비 상태를 0(정지)으로 클리어합니다.
+    cursor.execute('UPDATE users SET is_running = 0')
+    
+    conn.commit()
+    conn.close()
     
     # [추가] 서버가 새로 시작될 때, 비정상 종료로 인해 DB에 1(실행중)로 남아있던 좀비 상태를 0(정지)으로 클리어합니다.
     # 이로써 사용자가 대시보드에서 직접 [시작] 버튼을 눌러야만 매매가 시작되도록 제어합니다.
@@ -156,12 +187,49 @@ def load_portfolio_state(user_id, is_mock):
     """실전/모의투자 모드에 맞춰 상태를 불러옵니다."""
     mode = 1 if is_mock else 0
     conn = get_db_connection()
-    row = conn.execute('SELECT state_json FROM bot_states WHERE user_id = ? AND is_mock = ?', 
+    row = conn.execute('SELECT state_json FROM bot_states WHERE user_id = ? AND 일 is_mock = ?', 
                        (user_id, mode)).fetchone()
     conn.close()
     if row and row['state_json']:
         return json.loads(row['state_json'])
     return None
+
+# 🟢 [여기에 새로 추가] AI 자가 학습용 DB 헬퍼 함수 🟢
+def log_trade_journal(user_id, ticker, stock_name, action, price, strategy, ai_reason, profit=0):
+    conn = get_db_connection()
+    conn.execute('''
+        INSERT INTO trade_journal (user_id, ticker, stock_name, action, price, strategy, ai_reason, profit)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (user_id, ticker, stock_name, action, price, strategy, ai_reason, profit))
+    conn.commit()
+    conn.close()
+
+def get_recent_trades(user_id, ticker, limit=5):
+    """해당 종목의 최근 AI 매매 기록(오답 노트)을 불러옵니다."""
+    conn = get_db_connection()
+    rows = conn.execute('''
+        SELECT action, price, ai_reason, profit, date(created_at) as date
+        FROM trade_journal 
+        WHERE user_id = ? AND ticker = ? 
+        ORDER BY created_at DESC LIMIT ?
+    ''', (user_id, ticker, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def save_ai_rules(user_id, rule_text):
+    conn = get_db_connection()
+    conn.execute('''
+        INSERT OR REPLACE INTO ai_rules (user_id, rule_text, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+    ''', (user_id, rule_text))
+    conn.commit()
+    conn.close()
+
+def load_ai_rules(user_id):
+    conn = get_db_connection()
+    row = conn.execute('SELECT rule_text FROM ai_rules WHERE user_id = ?', (user_id,)).fetchone()
+    conn.close()
+    return row['rule_text'] if row else ""
 
 if __name__ == '__main__':
     init_db()

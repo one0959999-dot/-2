@@ -150,17 +150,33 @@ class GeminiApi:
         prompt = f"제공된 시장 데이터를 바탕으로 전문적인 '데일리 시장 분석 리포트'를 작성해주세요.\n\n[데이터]\n{market_data_text}"
         return self.generate_content(prompt)
 
-    def ai_approve_trade(self, signal, stock_name, ticker, price, strategy, indicator_val, **kwargs):
-        """매매 신호 발생 시 AI 최종 승인/거부"""
+    def ai_approve_trade(self, signal, stock_name, ticker, price, strategy, indicator_val, hot_sectors, recent_trades=None, custom_rules=""):
+        """매매 신호 발생 시 AI 최종 승인 (과거 오답 노트 및 자가 룰 반영)"""
         if not self.client:
             return True, "API 미설정으로 자동 승인"
 
         action = "매수" if signal == 'BUY' else "매도"
-        prompt = f"""[매매 신호 검토]
+        
+        # 과거 매매 기록(오답 노트) 텍스트화
+        history_text = "이 종목에 대한 최근 매매 기록이 없습니다."
+        if recent_trades:
+            lines = []
+            for t in recent_trades:
+                res_str = f"(수익: {t['profit']:,.0f}원)" if t['action'] == 'SELL' else ""
+                lines.append(f"- {t['date']} | {t['action']} | {t['price']:,.0f}원 | 당시승인이유: {t['ai_reason']} {res_str}")
+            history_text = "\n".join(lines)
+
+        prompt = f"""[매매 신호 최종 검토]
 종목: {stock_name}({ticker}) | 신호: {action} | 가격: {price:,}원
 전략: {strategy} | 지표값: {indicator_val:.2f}
 
-이 매매가 현재 시장 상황에서 적절한지 판단하여 CONFIRM 또는 REJECT로 답하고 이유를 한 줄로 적으세요.
+[당신이 스스로 만든 투자 원칙]
+{custom_rules if custom_rules else "아직 확립된 특별한 룰이 없습니다. 기본 원칙을 따르세요."}
+
+[이 종목에 대한 당신의 과거 매매 기록 (오답 노트)]
+{history_text}
+
+과거 기록과 당신의 투자 원칙을 바탕으로, 이 매매가 현재 시장 상황에서 적절한지 판단하여 CONFIRM 또는 REJECT로 답하고 이유를 한 줄로 적으세요. (과거에 똑같은 조건에서 실패했다면 과감히 REJECT 하세요)
 형식: DECISION: (CONFIRM/REJECT), REASON: (이유)"""
         
         try:
@@ -169,7 +185,23 @@ class GeminiApi:
             reason = res.split("REASON:")[-1].strip() if "REASON:" in res else "AI 분석 완료"
             return decision, reason
         except Exception:
-            return True, "오류 발생으로 인한 자동 승인"
+            return True, "오류 발생으로 자동 승인"
+
+    def generate_weekly_reflection(self, trade_history_text):
+        """매주 금요일, 한 주간의 매매를 돌아보고 새로운 규칙을 생성하는 자아성찰 메서드"""
+        if not self.client: return ""
+        
+        prompt = f"""당신은 AI 주식 트레이더입니다. 다음은 이번 주 당신의 실제 매매 결과입니다.
+{trade_history_text}
+
+위 결과를 분석하여, 어떤 조건에서 손실이 발생했고 어떤 조건에서 수익이 났는지 파악하세요.
+그리고 다음 주 매매 승인에 직접적으로 적용할 **[나만의 새로운 투자 원칙 3가지]**를 간결하게 마크다운 글머리 기호로 작성해주세요.
+이 원칙은 다음 주 당신의 시스템 프롬프트에 영구 주입되어 행동을 지배하게 됩니다."""
+        
+        try:
+            return self.generate_content(prompt)
+        except Exception:
+            return ""
 
     def reset_chat(self):
         """채팅 기록 초기화"""
