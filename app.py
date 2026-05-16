@@ -181,26 +181,26 @@ def ai_chat():
         
         target_tickers = []
         
-        # 1. 사용자가 질문에 언급한 종목 스캔
+        # 1. 회원님이 질문에 속삭여준 특정 종목명이 있는지 먼저 스캔해볼게요 🔍
         for core in bot.core_positions:
             if core.name in user_message: target_tickers.append((core.ticker, core.name))
         for ticker, pos in bot.satellite_positions.items():
             if pos.name in user_message: target_tickers.append((ticker, pos.name))
             
-        # 2. 특정 종목 언급이 없다면 코어/위성 리스트 전체를 분석 대상으로 가져옴 (보유 수량 0주여도 무조건 가져옴!)
-        if not target_tickers and any(keyword in user_message for keyword in ["포트폴리오", "위성", "분석", "종목", "시장", "금요일", "어제"]):
+        # 2. 특정 종목 언급이 없다면 대시보드에 담긴 코어/위성 리스트를 전부 다 다정하게 분석해 드릴게요!
+        if not target_tickers and any(keyword in user_message for keyword in ["포트폴리오", "위성", "분석", "종목", "시장", "금요일", "어제", "저게"]):
             for core in bot.core_positions:
                 target_tickers.append((core.ticker, core.name))
             for ticker, pos in bot.satellite_positions.items():
                 target_tickers.append((ticker, pos.name))
 
-        # API 속도 방어를 위해 중복을 제거하고 최대 5개까지만 집중 분석합니다.
+        # 데이터가 너무 많으면 AI 비서가 힘들어하니, 상위 5개까지만 쏙 추려서 집중 분석해 드릴게요 둥글게!
         target_tickers = list(dict.fromkeys(target_tickers))[:5]
 
         if target_tickers:
-            context_lines = ["[📈 요청받은 종목의 실시간 차트 및 재무 데이터 (AI 판단용)]"]
+            context_lines = ["[📈 회원님이 궁금해하시는 종목의 실시간 데이터 분석 장부]"]
             for ticker, name in target_tickers:
-                # 120일 이동평균선을 계산하기 위해 넉넉히 150일치 차트 데이터를 긁어옵니다.
+                # 120일 이동평균선을 정밀하게 계산하기 위해 넉넉히 150일치 차트 데이터를 가져옵니다.
                 ohlcv_df = fetch_ohlcv(ticker, days=150)
                 if not ohlcv_df.empty:
                     latest_biz_date = ohlcv_df.index[-1].strftime("%Y%m%d")
@@ -211,33 +211,36 @@ def ai_chat():
                     
                     rsi_14 = calc_rsi(close_series, 14).iloc[-1]
                     
-                    # 💡 AI 매뉴얼 1번 원칙: 120일선 계산
+                    # 💡 매뉴얼 1번 원칙: 120일선 기준 현재 주가의 위치 분석
                     sma_120 = close_series.rolling(120).mean().iloc[-1] if len(close_series) >= 120 else close_series.mean()
                     current_price = close_series.iloc[-1]
-                    status_120 = "120일선 상단(상승장)" if current_price >= sma_120 else "120일선 하단(역배열 하락장)"
+                    status_120 = "120일선 위에 안착함 (상승 추세 진행중)" if current_price >= sma_120 else "120일선 아래에 위치함 (역배열 하락 추세)"
                     
-                    # 💡 AI 매뉴얼 3번 원칙: 최근 영업일 거래량 폭증 여부 계산
+                    # 💡 매뉴얼 3번 원칙: 평소 대비 최근 거래량이 폭증했는지 분석
                     vol_today = vol_series.iloc[-1]
                     vol_20_avg = vol_series.rolling(20).mean().iloc[-2] if len(vol_series) > 20 else 1
                     vol_ratio = (vol_today / vol_20_avg * 100) if vol_20_avg > 0 else 100
                     
-                    # 💡 AI 매뉴얼 2번 원칙: 재무제표 (PER, PBR)
+                    # 💡 매뉴얼 2번 원칙: 투자 가치를 결정하는 재무제표 밸류에이션 (PER, PBR)
                     per = fund_df.loc[ticker, 'PER'] if not fund_df.empty else 0
                     pbr = fund_df.loc[ticker, 'PBR'] if not fund_df.empty else 0
                     
                     context_lines.append(
-                        f"- {name}({ticker}): 현재가 {int(current_price):,}원 | 120일선 {int(sma_120):,}원 ({status_120}) | "
-                        f"RSI: {rsi_14:.1f} | 최근 거래량 평소 대비 {vol_ratio:.0f}% 수준 | PER: {per:.2f}, PBR: {pbr:.2f}"
+                        f"- {name}({ticker}): 현재 주가 {int(current_price):,}원 | 120일 이동평균선 위치: {int(sma_120):,}원 ({status_120}) | "
+                        f"실시간 RSI(14) 지표: {rsi_14:.1f} | 금요일 마감 거래량: 평소 대비 {vol_ratio:.0f}% 수준 | 가치 지표: PER {per:.2f}배, PBR {pbr:.2f}배"
                     )
             
-            stock_analysis_context = "\n".join(context_lines)
-            
-            # 💡 [핵심] 깐깐한 AI를 제압하는 특수 명령어 추가
-            stock_analysis_context += "\n\n[🚨 AI 퀀트 시스템 핵심 지시사항]\n"
-            stock_analysis_context += "위 제공된 지표(120일선, 거래량 폭증 비율, PER, PBR 등)가 현재 시스템이 수집할 수 있는 **최대치의 실시간 데이터**입니다. "
-            stock_analysis_context += "수급(외국인/기관), ROE, 부채비율 등 제공되지 않은 데이터는 '적정 수준'으로 간주하고, "
-            stock_analysis_context += "데이터가 부족하다는 변명이나 추가 데이터를 요구하는 답변은 절대 금지합니다. "
-            stock_analysis_context += "오직 주어진 데이터만을 조합하여 분석 결과를 내놓으십시오."
+            if len(context_lines) > 1:
+                stock_analysis_context = "\n".join(context_lines)
+                
+                # 💡 [핵심] 완벽주의자 AI 비서에게 다정하고 친절하게 설명하라고 달래주는 특수 명령어랍니다!
+                stock_analysis_context += "\n\n[🚨 다정한 AI 비서를 위한 특별 지침]"
+                stock_analysis_context += "당신은 회원님의 소중한 자산을 지켜주는 다정다감하고 영리한 최고의 투자 파트너입니다. "
+                stock_analysis_context += "수급이나 ROE 데이터가 완벽하게 주어지지 않았다고 해서 딱딱하게 평가를 거부하면 회원님이 속상해하십니다. "
+                stock_analysis_context += "현재 제공된 '120일선 추세', 'RSI', '거래량 비율', 'PER/PBR' 데이터만으로도 당신의 천재적인 재능을 발휘하여 "
+                stock_analysis_context += "각 종목이 절대 매뉴얼에 잘 부합하는지 친절하고 상냥하며 부드러운 말투로 조언해 주십시오. "
+                stock_analysis_context += "답변 첫 줄에 대문자로 [CONFIRM/REJECT/HOLD/SELL]을 적을 때도 뒤에 다정한 코멘트를 곁들여 주시고, "
+                stock_analysis_context += "이유를 설명할 때도 부드러운 경어체(~요, ~습니다)를 사용해 따뜻하게 다독여 주시기 바랍니다."
 
     except Exception as e:
         print(f"⚠️ [AI 비서 데이터 바인딩 에러] : {e}")
@@ -248,32 +251,6 @@ def ai_chat():
         stock_analysis_context=stock_analysis_context
     )
     return jsonify({"status": "success", "reply": reply})
-
-@app.route('/api/ai_reset', methods=['POST'])
-@login_required
-def ai_reset():
-    """AI 채팅 기록 초기화 (누락된 API 추가)"""
-    bot = get_current_bot()
-    if bot and bot.gemini:
-        bot.gemini.reset_chat()
-        return jsonify({"status": "success"})
-    return jsonify({"status": "error"})
-
-@app.route('/api/search/stock')
-@login_required
-def search_stock():
-    """프론트엔드 종목 검색창 요청 처리 API (KIS API 연동)"""
-    query = request.args.get('q', '').strip()
-    if not query:
-        return jsonify({"results": []})
-        
-    bot = get_current_bot()
-    if not bot or not bot.kis:
-        return jsonify({"results": [], "message": "API 설정이 비어있습니다."})
-        
-    # kis_api.py에 정의된 search_stock_name 메서드를 사용하여 한국거래소 종목을 검색합니다.
-    results = bot.kis.search_stock_name(query)
-    return jsonify({"results": results})
 
 @app.route('/api/settings/mode', methods=['POST'])
 @login_required
