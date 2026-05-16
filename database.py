@@ -62,6 +62,9 @@ def init_db():
             pass 
 
     # 3. 봇 상태 테이블 (bot_states) - 실전/모의 장부 분리
+    # [핵심 수정] SQLite 특성상 기존 테이블의 기본키(PRIMARY KEY) 제약조건을 변경할 수 없으므로,
+    # 기존에 단일 키로 잘못 생성되어 꼬여있던 bot_states 테이블을 확실히 DROP(삭제)한 후 복합키 구조로 재생성합니다.
+    cursor.execute('DROP TABLE IF EXISTS bot_states')
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS bot_states (
         user_id INTEGER,
@@ -72,11 +75,6 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users (id)
     )
     ''')
-    
-    try:
-        cursor.execute('ALTER TABLE bot_states ADD COLUMN is_mock INTEGER DEFAULT 1')
-    except sqlite3.OperationalError:
-        pass
     
     # [추가] 서버가 새로 시작될 때, 비정상 종료로 인해 DB에 1(실행중)로 남아있던 좀비 상태를 0(정지)으로 클리어합니다.
     # 이로써 사용자가 대시보드에서 직접 [시작] 버튼을 눌러야만 매매가 시작되도록 제어합니다.

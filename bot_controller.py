@@ -339,13 +339,21 @@ class BotController:
             self.last_screen_date     = datetime.strptime(lsd_str, '%Y-%m-%d').date() if lsd_str else None
             self.daily_pnl            = state.get("daily_pnl", {})
 
-            # 복구된 리포트가 오늘 날짜가 아니면 버림 (재생성 유도)
+            # [핵심 수정] 장 휴무일(주말)에는 직전 거래일(금요일 등)의 리포트를 대시보드에서 볼 수 있도록 복구 정책을 바꿉니다.
             restored_report = state.get("daily_report", None)
             today_str = datetime.now().strftime('%Y-%m-%d')
-            if restored_report and restored_report.get('date') == today_str:
-                self.daily_report = restored_report
+            
+            if restored_report:
+                # 1) 오늘 날짜 리포트이거나, 2) 오늘이 장 휴무일인 주말(토=5, 일=6)이라면 파기하지 않고 그대로 유지합니다.
+                if restored_report.get('date') == today_str or datetime.now().weekday() >= 5:
+                    self.daily_report = restored_report
+                    if datetime.now().weekday() >= 5:
+                        self.add_log(f"📋 장 휴무일(주말)이므로 직전 거래일 분석 리포트({restored_report.get('date')})를 화면에 유지합니다.")
+                else:
+                    # 평일인데 오늘 자 리포트가 아니면 오전 11시에 최신 분석을 받아오기 위해 비워둡니다.
+                    self.daily_report = None  
             else:
-                self.daily_report = None  # 어제 리포트는 쓰지 않음
+                self.daily_report = None
             
             self.add_log(f"✅ 복구 완료: 코어 {len(self.core_positions)}개, 위성 {len(self.satellite_positions)}개")
             return True
@@ -696,14 +704,24 @@ class BotController:
         self._save_state()
 
     def generate_daily_report(self):
-        """매일 아침 시장 분석 리포트를 생성하고 상태에 저장합니다."""
+        """11시 1차 매매 종료 후 시장 분석 리포트를 생성하고 텔레그램으로 실시간 알림을 보냅니다."""
         try:
-            self.add_log("📝 일일 시장 분석 리포트 생성을 시작합니다...")
+            self.add_log("📝 11시 시장 분석 리포트 생성을 시작합니다...")
             report_data = generate_daily_market_report(gemini_client=self.gemini, verbose=False)
             if report_data:
                 self.daily_report = report_data
                 self.add_log("✅ 일일 시장 분석 리포트 생성 완료")
                 self._save_state()
+                
+                # [추가] 리포트가 정상 생성되면 설정된 텔레그램 채널로 요약본을 즉시 발송합니다.
+                if self.telegram:
+                    msg = "📝 [🎯 11시 장중 시장 분석 리포트 알림]\n\n"
+                    if isinstance(report_data, dict):
+                        # 리포트 딕셔너리 내부에서 요약(summary) 또는 본문(content)을 안전하게 추출합니다.
+                        msg += report_data.get('summary', report_data.get('content', '11시 시장 분석이 완료되었습니다. 자세한 정보는 대시보드 팝업창을 확인하세요!'))
+                    else:
+                        msg += str(report_data)
+                    self.telegram.send_message(msg)
         except Exception as e:
             self.add_log(f"⚠️ 일일 리포트 생성 중 오류: {e}")
 
@@ -722,24 +740,43 @@ class BotController:
 
         # 장중 매매: 5분마다
         schedule.every(5).minutes.do(self.trading_job)
-        # 일일 시장 분석 리포트 (08:00)
-        schedule.every().day.at("08:00").do(self.generate_daily_report)
-        # 데일리 위성 리밸런싱 (08:50) - 오타 수정됨 (monthly_rescreen -> _rescreen_satellites)
-        schedule.every().day.at("08:50").do(self._rescreen_satellites)
+        # 일일 시장 분석 리포트 (08:00 -> 11:00 변경)
+        # [수정] 1차 매매 골든타임이 종료되는 오전 11시에 정확하게 시장을 분석하도록 변경합니다.
+        schedule.every().day.at("11:00").do(self.generate_daily_report)
+        
+        # 데일리 위성 리밸런싱 (09:05)
+        schedule.every().day.at("09:05").do(self._rescreen_satellites)
 
         self.trading_job()  # 즉시 1회 실행
         
-        # 오늘 날짜의 위성 스크리닝이 안 되어 있으면 즉시 실행
         if getattr(self, 'last_screen_date', None) != datetime.now().date():
-            self.add_log("오늘 날짜의 위성 리밸런싱 기록이 없어 즉시 실행합니다...")
-            self._rescreen_satellites()
+            now_time_str = datetime.now().strftime('%H:%M')
+            if "09:00" <= now_time_str <= "15:30":
+                self.add_log("오늘 날짜의 위성 리밸런싱 기록이 없어 즉시 실행합니다...")
+                self._rescreen_satellites()
+            else:
+                self.add_log("오늘 날짜의 위성 리밸런싱 기록이 없으나 정규장 시간이 아니므로 정규 스케줄러(09:05)까지 대기합니다.")
 
-        # 오늘 날짜의 리포트가 없거나 어제 날짜면 즉시 재생성
+        # [버그 수정] 오늘 날짜의 리포트가 없더라도, 현재 시간이 11시 이전이라면 미리 생성하지 않고 11시 정각 스케줄러를 기다립니다.
+        # 이미 11시가 지난 시점에 봇을 켰을 때만 유실 방지를 위해 즉시 리포트를 생성합니다.
+        # [핵심 수정] 리포트 유실 방지 구문에서 주말 장 휴무 예외 처리를 정밀화합니다.
         today = datetime.today().strftime('%Y-%m-%d')
         if not self.daily_report or self.daily_report.get('date') != today:
-            self.add_log("과거 리포트 감지. 오늘 날짜로 리포트를 재생성합니다...")
-            self.daily_report = None
-            self.generate_daily_report()
+            now = datetime.now()
+            
+            # 평일이고 오전 11시가 이미 지났는데 오늘 자 리포트가 누락된 경우에만 즉시 생성합니다.
+            if now.weekday() < 5 and now.strftime('%H:%M') >= "11:00":
+                self.add_log("오전 11시가 지났으나 오늘 자 시장 분석 리포트가 없어 즉시 재생성합니다...")
+                self.daily_report = None
+                self.generate_daily_report()
+            elif now.weekday() >= 5:
+                # 주말일 때는 과거 리포트 주소가 대시보드 메모리에 잘 안착해 있다면 소중히 유지합니다.
+                if self.daily_report:
+                    self.add_log(f"📋 주말 장 휴무 모드: 이전 거래일 리포트({self.daily_report.get('date')})를 대시보드 화면에 노출합니다.")
+                else:
+                    self.add_log("오늘 자 시장 분석 리포트가 없고 시스템에 저장된 이전 과거 리포트도 존재하지 않습니다.")
+            else:
+                self.add_log("오늘 자 시장 분석 리포트가 아직 없으나, 평일 11시 이전이므로 정규 분석 스케줄을 대기합니다.")
 
         while self.is_running:
             schedule.run_pending()
