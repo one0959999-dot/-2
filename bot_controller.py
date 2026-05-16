@@ -813,9 +813,9 @@ class BotController:
 
     # ─── 봇 시작/정지 ───
     def _run_loop(self, total_cash):
-        # 💡 전역 스케줄러 전체를 지우면 다른 사용자 봇이 멈추므로, 본인 유저 ID 태그가 붙은 작업만 초기화합니다.
-        user_tag = f"user_{self.user_id}"
-        schedule.clear(user_tag)
+        import schedule
+        # 💡 전역 schedule 대신 각 봇마다 독립된 스케줄러 인스턴스를 생성하여 스케줄러가 꼬이는 버그를 원천 차단합니다.
+        self.scheduler = schedule.Scheduler()
 
         # 서버 재시작 시 기존 상태 복구 시도
         restored = self._restore_state()
@@ -826,10 +826,13 @@ class BotController:
             # 복구 성공 시 schedule만 재등록
             self.add_log("📊 기존 포트폴리오로 매매를 재개합니다.")
 
-        # 💡 각 스케줄 등록 시 .tag(user_tag)를 붙여 유저별로 독립 관리합니다.
-        schedule.every(5).minutes.do(self.trading_job).tag(user_tag)
-        schedule.every().day.at("11:00").do(self.generate_daily_report).tag(user_tag)
-        schedule.every().day.at("09:05").do(self._rescreen_satellites).tag(user_tag)
+        # 장중 매매: 5분마다 등록
+        self.scheduler.every(5).minutes.do(self.trading_job)
+        # 일일 시장 분석 리포트 등록
+        self.scheduler.every().day.at("11:00").do(self.generate_daily_report)
+        
+        # 데일리 위성 리밸런싱 등록
+        self.scheduler.every().day.at("09:05").do(self._rescreen_satellites)
 
         self.trading_job()  # 즉시 1회 실행
         
@@ -841,9 +844,7 @@ class BotController:
             else:
                 self.add_log("오늘 날짜의 위성 리밸런싱 기록이 없으나 정규장 시간이 아니므로 정규 스케줄러(09:05)까지 대기합니다.")
 
-        # [버그 수정] 오늘 날짜의 리포트가 없더라도, 현재 시간이 11시 이전이라면 미리 생성하지 않고 11시 정각 스케줄러를 기다립니다.
-        # 이미 11시가 지난 시점에 봇을 켰을 때만 유실 방지를 위해 즉시 리포트를 생성합니다.
-        # [핵심 수정] 리포트 유실 방지 구문에서 주말 장 휴무 예외 처리를 정밀화합니다.
+        # 오늘 날짜의 리포트가 없더라도, 현재 시간이 11시 이전이라면 미리 생성하지 않고 11시 정각 스케줄러를 기다립니다.
         today = datetime.today().strftime('%Y-%m-%d')
         if not self.daily_report or self.daily_report.get('date') != today:
             now = datetime.now()
@@ -863,7 +864,8 @@ class BotController:
                 self.add_log("오늘 자 시장 분석 리포트가 아직 없으나, 평일 11시 이전이므로 정규 분석 스케줄을 대기합니다.")
 
         while self.is_running:
-            schedule.run_pending()
+            # 💡 전역 큐가 아닌 새로 만든 내 봇의 독립 스케줄러 작업만 실행하도록 변경합니다.
+            self.scheduler.run_pending()
             time.sleep(1)
 
     def start(self, total_cash=10_000_000):

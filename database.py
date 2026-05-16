@@ -7,7 +7,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 DB_PATH = 'users.db'
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
+    # 💡 timeout=15.0을 추가하여 다른 스레드가 쓰고 있을 때 즉시 에러를 내지 않고 15초간 대기하게 만듭니다.
+    # 💡 check_same_thread=False를 추가하여 여러 스레드가 충돌 없이 안정적으로 안전하게 DB를 공유하도록 합니다.
+    conn = sqlite3.connect('lassi.db', check_same_thread=False, timeout=15.0)
     conn.row_factory = sqlite3.Row
     return conn
 
