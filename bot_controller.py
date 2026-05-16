@@ -151,11 +151,10 @@ class BotController:
         else:
             self.telegram = None
         
-        # 제미나이 AI 객체 갱신
-        if gemini_config and gemini_config.get('api_key'):
-            self.gemini = GeminiApi(api_key=gemini_config.get('api_key', '').strip())
-        else:
-            self.gemini = None
+        # [수정] 제미나이 AI 객체는 단일 두뇌(공유형) 체제를 엄격히 유지해야 하므로,
+        # 개별 봇 몸체에서 인스턴스를 독단적으로 새로 생성하여 메모리 주소를 파괴하지 않도록 코드를 제거합니다.
+        # 최신 두뇌의 실시간 주입 및 키 동기화는 이제 상단의 BotManager.get_bot에서 완벽하게 통합 전담 처리합니다.
+        pass
             
         self._init_dummy_cores()
         self.add_log("🔑 변경된 API 키 및 계좌 설정이 시스템에 실시간 반영되었습니다.")
@@ -870,11 +869,18 @@ class BotManager:
         is_mock = bool(user_data.get('is_mock', 1))
         bot_key = (user_id, is_mock)
         
-        # 1. [AI 엔진 싱글톤화] 해당 유저의 공유형 AI 엔진이 메모리에 없다면 최초 1회만 생성
-        if user_id not in self.ai_clients and user_data.get('gemini_api_key'):
-            from gemini_api import GeminiApi
-            self.ai_clients[user_id] = GeminiApi(api_key=user_data.get('gemini_api_key').strip())
-            print(f"🤖 [AI 공유 엔진] User {user_id}를 위한 단일 AI 엔진이 생성되었습니다. (모든 모드에서 공유)")
+        # 1. [버그 수정] 단일 AI 엔진 싱글톤 및 실시간 키 갱신 구조화
+        # 사용자가 키를 처음 등록하거나 변경했을 때, 기존 인스턴스가 주머니에 있더라도 최신 키 정보로 확실하게 자동 리로드합니다.
+        if user_data.get('gemini_api_key'):
+            api_key_clean = user_data.get('gemini_api_key').strip()
+            
+            # AI 객체가 아예 없거나, 기존 객체가 들고 있는 키값과 새로 전달받은 키값이 다를 때만 인스턴스를 동적으로 교체합니다.
+            if user_id not in self.ai_clients or getattr(self.ai_clients[user_id], '_current_key', '') != api_key_clean:
+                from gemini_api import GeminiApi
+                new_ai = GeminiApi(api_key=api_key_clean)
+                new_ai._current_key = api_key_clean  # 키 변경 추적용 임시 바인딩 속성
+                self.ai_clients[user_id] = new_ai
+                print(f"🤖 [AI 공유 엔진 활성화/갱신] User {user_id}의 최신 API 키로 공유형 AI 두뇌 세팅 완료.")
 
         # 2. 쌍둥이 봇 바디(실전 또는 모의)가 주머니에 없다면 생성
         if bot_key not in self.bots:
@@ -892,15 +898,16 @@ class BotManager:
                 "chat_id": user_data.get('telegram_chat_id')
             }
             
-            # BotController 인스턴스(바디) 생성 (Gemini 키는 일단 제외하고 생성)
             self.bots[bot_key] = BotController(
                 user_id, kis_config, tele_config, gemini_config=None,
                 core_stocks=user_data.get('core_stocks'),
                 is_mock=is_mock
             )
             
-            # 3. [핵심] 생성된 봇 바디에 중앙에서 관리하는 '공유형 AI 엔진'을 똑같이 주입합니다.
-            self.bots[bot_key].gemini = self.ai_clients.get(user_id)
+        # 3. [핵심] 최초 생성 시점뿐만 아니라,get_bot이 실행될 때마다(매 API 트래픽마다) 
+        # 항상 중앙 매니저의 최신 AI 두뇌 인스턴스 주소를 봇 바디에 강제로 실시간 주입 및 리바인딩합니다.
+        if user_id in self.ai_clients:
+            self.bots[bot_key].gemini = self.ai_clients[user_id]
             
         return self.bots.get(bot_key)
 

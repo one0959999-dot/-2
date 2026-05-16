@@ -190,12 +190,12 @@ def set_mode():
     conn.commit()
     conn.close()
     
-    # 2. 실행 중인 봇의 모드 즉시 변경
-    bot = get_current_bot()
-    if bot:
-        # 사용자의 가설정 자산 원금(initial_cash)을 함께 인자로 전달하여 장부 초기화에 대응합니다.
-        user_cash = current_user.data.get('initial_cash', 10000000)
-        bot.update_mode(bool(is_mock), total_cash=user_cash)
+    # [핵심 수정] 로그인 세션 메모리(current_user.data)의 모드 상태를 즉시 변경해 줍니다.
+    # 단일 객체의 내부 속성을 변조(bot.update_mode)하는 대신, 분리된 독립 쌍둥이 봇 인스턴스가 완벽히 스위칭되게 만듭니다.
+    current_user.data['is_mock'] = is_mock
+    
+    # 새롭게 전환된 모드에 맞는 쌍둥이 봇 인스턴스를 백엔드 메모리에 깨끗하게 생성 및 복구해 둡니다.
+    get_current_bot()
         
     return jsonify({"status": "success", "is_mock": is_mock})
 
@@ -214,16 +214,21 @@ def set_keys():
         'telegram_chat_id': data.get('telegram_chat_id'),
         'gemini_api_key': data.get('gemini_api_key'),
         'core_stocks': data.get('core_stocks'),
-        'is_mock': data.get('is_mock')
+        'is_mock': int(data.get('is_mock', 1)) # 명확한 정수형 보장
     }
 
-   # 1. 데이터 저장
+    # 1. 데이터 저장
     update_user_keys(current_user.id, update_data)
 
-    # [핵심 추가] 변경된 설정을 메모리에 구동 중인 봇 컨트롤러 인스턴스에도 즉시 동기화해 줍니다.
-    is_mock = int(data.get('is_mock', 1))
+    # [핵심 수정] 사용자가 수정한 새로운 API 키셋 정보들을 로그인 세션 캐시 메모리에도 통틀어 동기화합니다.
+    for k, v in update_data.items():
+        current_user.data[k] = v
+
+    is_mock = update_data['is_mock']
     prefix = 'mock_' if is_mock else 'real_'
     
+    # [쌍둥이 구조 최적화] 현재 가동 중인 메인 봇 뿐만 아니라, 반대편 방에 대기 중인 쌍둥이 봇도 구형 키를 들고 있지 않도록 정밀 갱신합니다.
+    # 1) 현재 활성화되어 화면에 노출 중인 봇 객체 동기화
     bot = get_current_bot()
     if bot:
         bot.reload_api_keys(
@@ -232,6 +237,28 @@ def set_keys():
                 "app_secret": data.get(f'{prefix}app_secret'),
                 "account_no": data.get(f'{prefix}account_no'),
                 "is_mock": bool(is_mock)
+            },
+            telegram_config={
+                "token": data.get('telegram_token'),
+                "chat_id": data.get('telegram_chat_id')
+            },
+            gemini_config={
+                "api_key": data.get('gemini_api_key')
+            },
+            core_stocks=data.get('core_stocks')
+        )
+
+    # 2) 반대편 대기실에 존재하는 쌍둥이 봇 객체도 메모리에 있다면 구형 접속 정보가 남지 않도록 동시 갱신
+    other_mock = not bool(is_mock)
+    other_prefix = 'mock_' if other_mock else 'real_'
+    other_bot = manager.bots.get((current_user.id, other_mock))
+    if other_bot:
+        other_bot.reload_api_keys(
+            kis_config={
+                "app_key": data.get(f'{other_prefix}app_key'),
+                "app_secret": data.get(f'{other_prefix}app_secret'),
+                "account_no": data.get(f'{other_prefix}account_no'),
+                "is_mock": other_mock
             },
             telegram_config={
                 "token": data.get('telegram_token'),
