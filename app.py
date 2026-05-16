@@ -173,7 +173,58 @@ def ai_chat():
     if not bot or not bot.gemini:
         return jsonify({"status": "error", "reply": "AI API 키를 등록해주세요."})
 
-    reply = bot.gemini.chat(user_message, portfolio_context=bot.get_status())
+    stock_analysis_context = None
+    query_ticker = None
+    stock_name = None
+
+    if "삼성전자" in user_message: query_ticker, stock_name = "005930", "삼성전자"
+    elif "하이닉스" in user_message: query_ticker, stock_name = "000660", "SK하이닉스"
+    elif "보령" in user_message: query_ticker, stock_name = "003850", "보령"
+    elif "현대차" in user_message: query_ticker, stock_name = "005380", "현대차"
+    elif "NAVER" in user_message or "네이버" in user_message: query_ticker, stock_name = "035420", "NAVER"
+
+    if query_ticker:
+        try:
+            from pykrx import stock as krx_stock
+            from stock_screener import fetch_ohlcv, calc_rsi
+
+            # 1. 차트 데이터를 먼저 60일치 긁어옵니다. (주말이어도 알아서 과거 영업일 데이터를 안전하게 들고 옴)
+            ohlcv_df = fetch_ohlcv(query_ticker, days=60)
+
+            if not ohlcv_df.empty:
+                # 🟢 핵심 수정: 오늘 날짜 대신 차트 데이터의 가장 마지막 인덱스(실제 최신 영업일 날짜)를 끄집어냅니다.
+                latest_biz_date = ohlcv_df.index[-1].strftime("%Y%m%d")
+                
+                # 추출한 최신 영업일 날짜로 재무 펀더멘탈을 조회하여 주말 공통 에러를 원천 차단합니다.
+                fund_df = krx_stock.get_market_fundamental_by_ticker(latest_biz_date, latest_biz_date, query_ticker)
+
+                if not fund_df.empty:
+                    per = fund_df.loc[query_ticker, 'PER']
+                    pbr = fund_df.loc[query_ticker, 'PBR']
+                    eps = fund_df.loc[query_ticker, 'EPS']
+                    div_yield = fund_df.loc[query_ticker, '배당수익률']
+
+                    close_series = ohlcv_df['close']
+                    rsi_series = calc_rsi(close_series, 14)
+                    
+                    current_price = int(close_series.iloc[-1])
+                    current_rsi = float(rsi_series.iloc[-1])
+
+                    stock_analysis_context = (
+                        f"종목명: {stock_name} ({query_ticker})\n"
+                        f"기준 영업일: {latest_biz_date[:4]}년 {latest_biz_date[4:6]}월 {latest_biz_date[6:]}일\n"
+                        f"1. [재무제표 지표] 현재가: {current_price:,}원 | PER: {per:.2f}배 | PBR: {pbr:.2f}배 | EPS: {eps:,}원 | 배당수익률: {div_yield:.2f}%\n"
+                        f"2. [기술적 차트 지표] 실시간 RSI(14): {current_rsi:.1f} (30 이하 과매도, 70 이상 과매수)\n"
+                        f"3. [최근 5거래일 종가 추이]: {[int(x) for x in close_series.tail(5).values]}"
+                    )
+        except Exception as e:
+            print(f"⚠️ [AI 비서 데이터 바인딩 에러] : {e}")
+
+    reply = bot.gemini.chat(
+        user_message, 
+        portfolio_context=bot.get_status(), 
+        stock_analysis_context=stock_analysis_context
+    )
     return jsonify({"status": "success", "reply": reply})
 
 @app.route('/api/ai_reset', methods=['POST'])

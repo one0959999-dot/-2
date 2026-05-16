@@ -255,32 +255,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const mockSection = document.getElementById('mock-notice-section');
 
         if (realSection && mockSection) {
+            // 🟢 모의/실전 상관없이 증권사 API 데이터 조회를 위해 항상 폴링을 유지합니다.
+            startKisBalancePolling();
+
             if (isLive) {
                 realSection.style.display = 'block';
                 mockSection.style.display = 'none';
-                startKisBalancePolling(); // 실전: 자동 업데이트 시작
             } else {
                 realSection.style.display = 'none';
                 mockSection.style.display = 'block';
-                stopKisBalancePolling(); // 모의: 중지
 
-                // 💎 [버그 수정] 모의투자일 때 기존 실전 자산의 흔적을 말끔히 소거하고 독립 가상자산 총액 강제 수치 대치
-                const totalAsset = data.mock_total_asset || 0;
-                const totalValEl = document.getElementById('total-value');
-                if (totalValEl) {
-                    totalValEl.textContent = totalAsset.toLocaleString() + '원';
-                }
+                // API 데이터(/api/kis_balance)가 로드되기 전 최초 1회만 백엔드 가상 장부 값으로 초기값 바인딩
+                if (document.getElementById('total-value').textContent === '-') {
+                    const totalAsset = data.mock_total_asset || 0;
+                    const totalValEl = document.getElementById('total-value');
+                    if (totalValEl) {
+                        totalValEl.textContent = totalAsset.toLocaleString() + '원';
+                    }
 
-                // 모의투자만의 실현 손익 및 수익률 카드 연동
-                const totalPnl = data.mock_pnl || 0;
-                const pnlRt = data.mock_pnl_rt || 0;
-                const pnlEl = document.getElementById('total-pnl');
-                if (pnlEl) {
-                    const sign = totalPnl >= 0 ? '+' : '';
-                    const color = totalPnl > 0 ? '#f85149' : (totalPnl < 0 ? '#58a6ff' : '#8b949e');
-                    pnlEl.style.color = color;
-                    pnlEl.style.fontWeight = '700';
-                    pnlEl.textContent = `수익: ${sign}${totalPnl.toLocaleString()}원 (${sign}${pnlRt.toFixed(2)}%)`;
+                    // 모의투자만의 실현 손익 및 수익률 카드 초기 연동
+                    const totalPnl = data.mock_pnl || 0;
+                    const pnlRt = data.mock_pnl_rt || 0;
+                    const pnlEl = document.getElementById('total-pnl');
+                    if (pnlEl) {
+                        const sign = totalPnl >= 0 ? '+' : '';
+                        const color = totalPnl > 0 ? '#f85149' : (totalPnl < 0 ? '#58a6ff' : '#8b949e');
+                        pnlEl.style.color = color;
+                        pnlEl.style.fontWeight = '700';
+                        pnlEl.textContent = `수익: ${sign}${totalPnl.toLocaleString()}원 (${sign}${pnlRt.toFixed(2)}%)`;
+                    }
                 }
             }
         }

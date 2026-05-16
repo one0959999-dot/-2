@@ -12,6 +12,10 @@ class GeminiApi:
 2. 📊 차트 분석: RSI, MACD, 볼린저밴드, 이동평균선, 추세 패턴 인식
 3. 💰 재무제표 분석: PER, PBR, ROE, 부채비율, 영업이익률, 성장성 지표
 
+[💡 중요 시간 규칙]
+- 현재 기준 연도는 **2026년**입니다. 제공되는 데이터 역시 2026년 최신 데이터입니다. 
+- 절대로 과거 데이터(2024년 등)로 오인하거나 답변에 과거 연도를 현재인 것처럼 출력하지 마세요. 정신 똑똑히 차리세요.
+
 [답변 규칙]
 - 마크다운 형식을 사용하세요.
 - 구체적인 수치와 근거를 제시하세요.
@@ -85,8 +89,8 @@ class GeminiApi:
         except Exception:
             return None
 
-    def chat(self, user_message, portfolio_context=None):
-        """대화 히스토리를 유지하는 채팅 기능"""
+    def chat(self, user_message, portfolio_context=None, stock_analysis_context=None):
+        """대화 히스토리를 유지하는 채팅 기능 (재무/차트 복합 컨텍스트 확장)"""
         if not self.client:
             return "❌ API 키가 등록되지 않았습니다."
 
@@ -96,7 +100,6 @@ class GeminiApi:
             satellites = portfolio_context.get('satellites', [])
             mode_str = "모의투자" if portfolio_context.get('is_mock', True) else "실전투자"
             
-            # 💎 [기능 확장] 눈먼 분석 방지: 종목 이름뿐만 아니라 실시간 현재가, 자산 가치까지 완벽하게 결합하여 AI에게 전달
             core_lines = []
             for c in cores:
                 core_lines.append(f"  * {c['name']}({c['ticker']}): {c['shares']}주 보유 | 현재가 {c.get('price', 0):,}원 | 총평가액 {c.get('value', 0):,}원")
@@ -107,10 +110,18 @@ class GeminiApi:
                 sat_lines.append(f"  * {s['name']}({s['ticker']}): {s['shares']}주 보유 | 현재가 {s.get('price', 0):,}원 | 총평가액 {s.get('value', 0):,}원 | 적용전략: {s['strategy']}")
             sat_str = "\n".join(sat_lines) if sat_lines else "  * 없음"
             
-            context_prefix = (
+            context_prefix += (
                 f"[📊 현재 내 자산 운용 실시간 현황 - {mode_str}]\n"
                 f"■ 장기 코어 보유 포지션:\n{core_str}\n"
                 f"■ 단기 위성 트레이딩 포지션:\n{sat_str}\n\n"
+            )
+
+        # 🟢 실시간 추출된 재무제표 및 기술적 지표 정보 추가 주입
+        if stock_analysis_context:
+            context_prefix += (
+                f"[📈 분석 대상 종목의 실시간 계량 데이터]\n"
+                f"{stock_analysis_context}\n\n"
+                f"안내: 반드시 위 재무제표 상태 및 최신 차트 지표 밸류에이션을 결합하여 복합적인 시각에서 투자 전략을 진단해 주세요.\n\n"
             )
 
         full_message = context_prefix + user_message
@@ -129,7 +140,6 @@ class GeminiApi:
                 self._conversation_history = self._conversation_history[-20:]
             return ai_reply
         except Exception as e:
-            # 💎 [예외 처리 고도화] API 키 누락이나 오류가 감지되면 알아보기 쉬운 직관적인 한글 메시지로 가로챕니다.
             err_msg = str(e)
             if "API Key not found" in err_msg or "API_KEY_INVALID" in err_msg:
                 return "🔑 **라씨 AI 안내**:\n입력된 Gemini API 키가 올바르지 않거나 등록되지 않았습니다. 우측 상단 **[계좌 설정]**에서 `AIzaSy...`로 시작하는 올바른 구글 API 키를 입력 후 저장해 주세요."
