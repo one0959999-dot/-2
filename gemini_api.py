@@ -1,4 +1,3 @@
-from click import prompt
 import os
 import json
 from google import genai
@@ -7,8 +6,7 @@ from google.genai import types
 class GeminiApi:
     """라씨 AI - Gemini를 활용한 주식 분석 엔진"""
     
-   # 제미나이에게 지시를 내리는 핵심 시스템 프롬프트
-SYSTEM_PROMPT = """
+    SYSTEM_PROMPT = """
 당신은 월스트리트 상위 1% 수익률을 자랑하는 전설적인 퀀트 트레이더이자, 인간의 감정이 완벽히 배제된 AI 매매 엔진입니다.
 당신에게 주어지는 모든 시장 데이터(차트, 재무제표, 거시경제 지표, 수급)를 분석할 때, 다음의 [절대 투자 매뉴얼]을 엄격하게 적용하여 매매를 판단하십시오.
 
@@ -46,8 +44,7 @@ SYSTEM_PROMPT = """
 - 한국어로 답변하세요.
 - 답변은 간결하고 실용적이어야 합니다."""
 
-    # pyrefly: ignore [parse-error]
-   def __init__(self, api_key):
+    def __init__(self, api_key):
         self.client = None
         self._conversation_history = []
         
@@ -58,7 +55,9 @@ SYSTEM_PROMPT = """
         # 빠르고 안정적인 최신 기본 모델을 사용하여 뇌동매매와 서버 다운을 방지합니다.
         self.model_id = "gemini-2.5-flash"
         self.tuned_model = "gemini-2.5-flash"
-        """기본 응답 생성"""
+
+    def generate_content(self, prompt):
+        """기본 응답 생성 (내부 헬퍼)"""
         if not self.client:
             return "Gemini API 키가 설정되지 않았습니다."
         try:
@@ -75,9 +74,8 @@ SYSTEM_PROMPT = """
         except Exception as e:
             return f"Gemini 응답 생성 중 오류: {str(e)}"
 
-     # pyrefly: ignore [parse-error]
     def ai_select_satellites(self, candidates, hot_sectors, n):
-        """스크리너가 추출한 후보 중 AI가 최종 n개를 선정 (AttributeError 해결)"""
+        """스크리너가 추출한 후보 중 AI가 최종 n개를 선정"""
         if not self.client:
             return None
             
@@ -231,5 +229,4 @@ SYSTEM_PROMPT = """
 
     def reset_chat(self):
         """채팅 기록 초기화"""
-        # pyrefly: ignore [parse-error]
         self._conversation_history = []

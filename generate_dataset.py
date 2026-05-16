@@ -19,7 +19,7 @@ if isinstance(df_us.columns, pd.MultiIndex):
 
 print("🧠 2. 한국 시장 (KOSPI & KOSDAQ) 데이터 수집 중...")
 end_date = datetime.today()
-start_date = end_date - timedelta(days=365 * 6) # 최근 6년치 국장 데이터
+start_date = datetime(2000, 1, 1)# 2000년부터 국장 상장 이후 전체 데이터
 
 # 분석 대상: 미국(QQQ), 한국 코스피(KODEX 200), 한국 코스닥(KODEX 코스닥150)
 market_data = [

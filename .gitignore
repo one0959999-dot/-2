@@ -15,3 +15,4 @@ config.yaml
 *.txt
 error.log
 server_log.txt
+lassi.db

@@ -10,7 +10,7 @@ print("📂 1단계: 로컬에서 데이터셋을 직접 읽어옵니다...")
 training_data = []
 
 # jsonl 파일을 파이썬이 직접 읽어서 리스트로 만듭니다.
-with open("bear_market_training.jsonl", "r", encoding="utf-8") as f:
+with open("global_market_training.jsonl", "r", encoding="utf-8") as f:
     for line in f:
         data = json.loads(line)
         # 구글이 요구하는 'TuningExample' 규격에 맞게 하나씩 포장
