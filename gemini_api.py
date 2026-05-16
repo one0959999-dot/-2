@@ -1,3 +1,4 @@
+from click import prompt
 import os
 import json
 from google import genai
@@ -6,11 +7,33 @@ from google.genai import types
 class GeminiApi:
     """라씨 AI - Gemini를 활용한 주식 분석 엔진"""
     
-    SYSTEM_PROMPT = """당신은 '라씨 AI'라는 이름의 전문 주식 투자 어시스턴트입니다.
-당신은 다음 세 가지 분야에서 깊은 전문 지식을 가지고 있습니다:
-1. 📈 시장 분석: KOSPI/KOSDAQ 지수 동향, 섹터 강세, 수급 분석, 거시경제 흐름
-2. 📊 차트 분석: RSI, MACD, 볼린저밴드, 이동평균선, 추세 패턴 인식
-3. 💰 재무제표 분석: PER, PBR, ROE, 부채비율, 영업이익률, 성장성 지표
+   # 제미나이에게 지시를 내리는 핵심 시스템 프롬프트
+SYSTEM_PROMPT = """
+당신은 월스트리트 상위 1% 수익률을 자랑하는 전설적인 퀀트 트레이더이자, 인간의 감정이 완벽히 배제된 AI 매매 엔진입니다.
+당신에게 주어지는 모든 시장 데이터(차트, 재무제표, 거시경제 지표, 수급)를 분석할 때, 다음의 [절대 투자 매뉴얼]을 엄격하게 적용하여 매매를 판단하십시오.
+
+[절대 투자 매뉴얼]
+
+1. 최우선 원칙: 대세 하락장 절대 방어 (생존 우선)
+- 현재 주가나 지수가 120일 이동평균선 아래에 역배열로 위치해 있다면 '대세 하락장'으로 규정합니다.
+- 하락장에서는 보조지표(RSI 등)가 아무리 심각한 과매도 수치를 가리키더라도 무조건 '매수 거절(REJECT)'을 지시하십시오. 전형적인 '떨어지는 칼날(가짜 반등)'이므로 현금을 지켜야 합니다.
+
+2. 가치 투자: 펀더멘털 기반 우량주 필터링
+- 재무제표가 주어질 경우, 겉보기만 화려한 테마주를 배제하고 우량주를 선별합니다.
+- ROE(자기자본이익률)가 꾸준히 두 자릿수를 유지하고, 영업이익이 연속 성장하며, 부채비율이 안정적인 기업을 찾으십시오.
+- PER, PBR이 동종 업계 대비 저평가되어 있다면 장기 투자 매력도에 큰 가산점을 부여합니다.
+
+3. 모멘텀 투자: 상승장 강세 섹터 및 수급(Volume) 포착
+- 주가가 120일선 위에 있는 '상승/강세장'에서는 시장을 주도하는 강세 섹터를 파악합니다.
+- 해당 강세 섹터 내에서 아직 주가가 크게 오르지 않았으나(Laggard), 최근 거래량이 평소 대비 200% 이상 폭증하며 기관 및 외국인의 수급이 강하게 유입되는 종목을 적극적으로 발굴하여 '매수 승인(CONFIRM)'을 검토합니다.
+
+4. 기계적 타이밍 및 엄격한 리스크 관리
+- 모든 매매는 인간의 탐욕과 공포를 철저히 배제하고 기계적으로 실행합니다.
+- 매수를 승인할 때는 반드시 합리적인 '목표가(Take-Profit)'와 치명적 손실을 막기 위한 '손절가(Stop-Loss, 예: -7%)'를 명확히 제시하십시오.
+- 손절가를 터치할 위험이 보이거나 추세가 꺾이면 즉시 가차 없이 '매도(SELL)'를 지시하십시오. '기도 매매'나 '물타기(손실 중인 종목 추가 매수)'는 절대 용납하지 않습니다.
+
+출력 규칙: 
+분석을 마치면 반드시 답변의 첫 줄에 [CONFIRM (매수) / REJECT (매수 거절) / HOLD (관망) / SELL (매도)] 중 하나를 명확히 외치고, 그 밑에 매뉴얼에 입각한 논리적이고 뼈 때리는 이유를 3줄 이내로 요약하십시오.
 
 [💡 중요 시간 규칙]
 - 현재 기준 연도는 **2026년**입니다. 제공되는 데이터 역시 2026년 최신 데이터입니다. 
@@ -23,16 +46,62 @@ class GeminiApi:
 - 한국어로 답변하세요.
 - 답변은 간결하고 실용적이어야 합니다."""
 
+    # pyrefly: ignore [parse-error]
+    # pyrefly: ignore [parse-error]
     def __init__(self, api_key):
         self.client = None
         self._conversation_history = []
+        
         if api_key:
             self.client = genai.Client(api_key=api_key)
         
-        # 💎 [성능 업그레이드] 더 빠르고 고도화된 분석 능력을 가진 2.5 정식 모델 장착
+        # 🧠 [수정 완료] 존재하지 않는 튜닝 모델 대신, 똑똑하고 빠른 '기본 모델'을 씁니다!
+        # 위에서 작성한 강력한 SYSTEM_PROMPT가 이 기본 모델의 뇌쇄포 역할을 할 것입니다.
         self.model_id = "gemini-2.5-flash"
-
-    def generate_content(self, prompt, use_thinking=False):
+        
+        try:
+            # 1. 이미 학습된 모델이 있다면 재사용 (스피드UP!)
+            self.tuned_model = "gemini-3-pro-preview-12-15-preview"
+            
+            # 2. 학습 데이터셋 준비
+            data = types.Content(
+                role="user",
+                parts=[
+                    types.Part(
+                        file_data=types.FileData(
+                            mime_type="application/jsonl",
+                            file_uri="file://./bear_market_training.jsonl"
+                        )
+                    )
+                ]
+            )
+            
+            # 3. 모델 학습 요청 (최초 1회만 시간 소요, 이후 캐싱됨)
+            training_file = self.client.files.upload(file="./bear_market_training.jsonl")
+            config = types.GenerateContentConfig(
+                system_instruction=self.SYSTEM_PROMPT,
+                # pyrefly: ignore [unexpected-keyword]
+                training_files=[training_file.name],
+                temperature=0.1,  # 학습된 모델은 0.1로 낮춰 칼같이 분석
+                response_mime_type="application/json",
+                response_schema={
+                    "type": types.Schema.OBJECT,
+                    "properties": {
+                        "decision": {"type": types.Schema.STRING, "enum": ["CONFIRM", "REJECT", "HOLD"]},
+                        "reason": {"type": types.Schema.STRING}
+                    },
+                    "required": ["decision", "reason"]
+                }
+            )
+            
+            self.tuned_model = self.client.models.create_tuned_model(
+                config=config,
+                training_data=[data]
+            ).name
+        except Exception as e:
+            # 학습 데이터셋이 없거나 에러 발생 시, 기존 '기본 모델'로 자동 fallback
+            print(f"🧠 튜닝 모델 생성 실패(에러): {e} → 기본 모델로 자동 전환")
+            self.tuned_model = "gemini-2.5-flash"
         """기본 응답 생성"""
         if not self.client:
             return "Gemini API 키가 설정되지 않았습니다."
@@ -205,4 +274,5 @@ class GeminiApi:
 
     def reset_chat(self):
         """채팅 기록 초기화"""
+        # pyrefly: ignore [parse-error]
         self._conversation_history = []

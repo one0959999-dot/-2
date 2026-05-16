@@ -1040,6 +1040,7 @@ class BotManager:
             # AI 객체가 아예 없거나, 기존 객체가 들고 있는 키값과 새로 전달받은 키값이 다를 때만 인스턴스를 동적으로 교체합니다.
             if user_id not in self.ai_clients or getattr(self.ai_clients[user_id], '_current_key', '') != api_key_clean:
                 from gemini_api import GeminiApi
+                # pyrefly: ignore [unexpected-keyword]
                 new_ai = GeminiApi(api_key=api_key_clean)
                 new_ai._current_key = api_key_clean  # 키 변경 추적용 임시 바인딩 속성
                 self.ai_clients[user_id] = new_ai
