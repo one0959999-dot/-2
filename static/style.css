@@ -1146,3 +1146,33 @@ header {
         font-size: 1.4rem;
     }
 }
+
+/* =========================================
+   [테마 클래스] 모의투자 모드 (따뜻한 베이지)
+   ========================================= */
+
+/* 전체 배경 및 텍스트 색상 */
+body.theme-warm-beige {
+    background-color: #f4efe6 !important;
+    /* 부드러운 베이지 배경색 */
+    color: #2c3e50 !important;
+    /* 시인성 높은 다크 그레이 글자색 */
+}
+
+/* 🟢 [가독성 개선] 모의투자 모드일 때, 코어/위성 카드 테마 오버라이드 */
+body.theme-warm-beige .glass-card,
+body.theme-warm-beige .info-card {
+    background: rgba(255, 255, 255, 0.95) !important;
+    border-color: #e4dcd0 !important;
+    color: #2c3e50 !important;
+    box-shadow: 0 4px 20px rgba(165, 150, 130, 0.15) !important;
+}
+
+/* 테이블 헤더 및 셀 텍스트 색상 최적화 */
+body.theme-warm-beige th {
+    color: #7f8c8d !important;
+}
+
+body.theme-warm-beige td {
+    color: #2c3e50 !important;
+}

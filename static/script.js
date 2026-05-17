@@ -187,7 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const realStocks = (d.stocks || []).filter(s => s.shares > 0);
                     if (kisTbody) {
                         if (realStocks.length > 0) {
-                            // 🟢 반복문 내부에서 직접 DOM을 건드리지 않고, 임시 문자열에 차곡차곡 모읍니다.
+                            // 반복문 내부에서 직접 DOM을 건드리지 않고, 임시 문자열에 차곡차곡 모읍니다.
                             let htmlBuffer = '';
                             realStocks.forEach(s => {
                                 const profitColor = s.profit_rt > 0 ? '#f85149' : (s.profit_rt < 0 ? '#58a6ff' : '#8b949e');
@@ -213,7 +213,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (kisTbody) kisTbody.innerHTML = `<tr><td colspan="6" class="muted-center">⚠️ ${errMsg}</td></tr>`;
                     if (kisSummary) kisSummary.textContent = 'API 오류';
 
-                    // 💎 [버그 수정] 한투 계좌 연결 실패 시 모의투자 금액이 지워지지 않고 실전에 남아 화면을 교란하는 오동작을 강제 차단
                     const totalValEl = document.getElementById('total-value');
                     if (totalValEl) {
                         totalValEl.textContent = '연결 실패 (API 키 확인 필요)';
@@ -235,7 +234,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     }
 
-    // 실전 모드: 실제 잔고 조회 시작 (10초 주기)
     function startKisBalancePolling() {
         fetchKisBalance(); // 항상 즉시 1회 호출
         if (kisBalanceInterval) return; // 이미 인터벌 실행 중이면 중복 등록 방지
@@ -256,7 +254,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const realSection = document.getElementById('real-account-section');
         const mockSection = document.getElementById('mock-notice-section');
 
-        // 🟢 다른 기기에서 바꾼 스위치 버튼과 글씨 하이라이트 불빛 물리적 연동
+        // 다른 기기에서 바꾼 스위치 버튼과 글씨 하이라이트 불빛 물리적 연동
         const cb = document.getElementById('modeSwitch');
         const lblReal = document.getElementById('label-real');
         const lblMock = document.getElementById('label-mock');
@@ -275,39 +273,39 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 🎨 [기능 개방 및 디자인 변경] 모의투자도 실전처럼 실시간 계좌 잔고를 완벽히 출력 및 동기화합니다.
-        if (realSection) realSection.style.display = 'block'; // 잔고 테이블 섹션 상시 노출
-        if (mockSection) mockSection.style.display = 'none';  // 단순 안내 문구는 숨김 처리
+        if (realSection && mockSection) {
+            realSection.style.display = 'block'; // 실전/모의 상관없이 잔고 테이블 상시 노출
+            mockSection.style.display = 'none';  // 단순 안내 문구는 숨김 처리
+
+            if (!isLive) {
+                // 모의투자 시 모의 자산 수치로 UI 강제 업데이트
+                const totalAsset = data.mock_total_asset || 0;
+                const totalValEl = document.getElementById('total-value');
+                if (totalValEl) {
+                    totalValEl.textContent = totalAsset.toLocaleString() + '원';
+                }
+
+                const totalPnl = data.mock_pnl || 0;
+                const pnlRt = data.mock_pnl_rt || 0;
+                const pnlEl = document.getElementById('total-pnl');
+                if (pnlEl) {
+                    const sign = totalPnl >= 0 ? '+' : '';
+                    const color = totalPnl > 0 ? '#f85149' : (totalPnl < 0 ? '#58a6ff' : '#8b949e');
+                    pnlEl.style.color = color;
+                    pnlEl.style.fontWeight = '700';
+                    pnlEl.textContent = `수익: ${sign}${totalPnl.toLocaleString()}원 (${sign}${pnlRt.toFixed(2)}%)`;
+                }
+            }
+        }
 
         // 🔄 실전/모의 모드에 상관없이 실시간 폴링(10초 주기 계좌 동기화)을 상시 가동합니다.
         startKisBalancePolling();
 
-        // 🎨 [배경색 및 테마 스위칭] 모의투자는 따뜻한 베이지 테마, 실전투자는 기존 다크 테마로 강제 대치
+        // 🎨 [가독성 개선 및 테마 스위칭] CSS 클래스로 전체 UI 테마를 제어합니다 (오인 매매 방지)
         if (isLive) {
-            // 실전투자: 기존 오리지널 다크 테마 스타일 복원
-            document.body.style.backgroundColor = "#0d1117";
-            document.body.style.color = "#c9d1d9";
-
-            document.querySelectorAll('.glass-card, .info-card').forEach(card => {
-                card.style.background = "rgba(22, 27, 34, 0.8)";
-                card.style.borderColor = "rgba(48, 54, 61, 0.8)";
-                card.style.color = "#e6edf3";
-            });
-            document.querySelectorAll('th').forEach(th => th.style.color = "#8b949e");
-            document.querySelectorAll('td').forEach(td => td.style.color = "#e6edf3");
+            document.body.classList.remove('theme-warm-beige');
         } else {
-            // 모의투자: 따뜻하고 부드러운 베이지/아이보리 감성 테마 적용 (오인 매매 절대 방지)
-            document.body.style.backgroundColor = "#f4efe6"; // 부드러운 베이지 배경색
-            document.body.style.color = "#2c3e50";          // 시인성 높은 다크 그레이 글자색
-
-            document.querySelectorAll('.glass-card, .info-card').forEach(card => {
-                card.style.background = "rgba(255, 255, 255, 0.95)";
-                card.style.borderColor = "#e4dcd0";
-                card.style.color = "#2c3e50";
-                card.style.boxShadow = "0 4px 20px rgba(165, 150, 130, 0.15)";
-            });
-            // 테이블 내부 헤더 및 텍스트 색상 최적화
-            document.querySelectorAll('th').forEach(th => th.style.color = "#7f8c8d");
-            document.querySelectorAll('td').forEach(td => td.style.color = "#2c3e50");
+            document.body.classList.add('theme-warm-beige');
         }
 
         // Mode Label Update
@@ -356,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('sat-num-display').textContent = data.num_satellites;
         }
 
-        // 💡 봇 상태를 받아올 때 현재 DB에 보관 중인 코어 종목 명단을 실시간으로 전역 변수에 복사해 둡니다.
+        // 봇 상태를 받아올 때 현재 DB에 보관 중인 코어 종목 명단을 실시간으로 전역 변수에 복사해 둡니다.
         if (data.cores) {
             window.cachedCoreStocks = data.cores.map(c => ({ ticker: c.ticker, name: c.name }));
         }
@@ -372,6 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cores.forEach((core) => {
             totalCoreValue += (core.value || 0);
             const div = document.createElement('div');
+            // CSS 테마 클래스에 의해 코어 카드의 색상도 일괄 자동 변경됩니다.
             div.className = 'info-card glass-card core-card';
             div.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -486,10 +485,18 @@ window.toggleMode = async function () {
                 const isLive = (data.is_mock === false || data.is_mock === 0);
                 const realSection = document.getElementById('real-account-section');
                 const mockSection = document.getElementById('mock-notice-section');
+
                 if (realSection && mockSection) {
-                    realSection.style.display = isLive ? 'block' : 'none';
-                    mockSection.style.display = isLive ? 'none' : 'block';
+                    realSection.style.display = 'block';
+                    mockSection.style.display = 'none';
                 }
+
+                if (isLive) {
+                    document.body.classList.remove('theme-warm-beige');
+                } else {
+                    document.body.classList.add('theme-warm-beige');
+                }
+
                 const pnlTitle = document.getElementById('pnl-title');
                 if (pnlTitle) pnlTitle.textContent = isLive ? '실전투자 수익률' : '모의투자 수익률';
             });
@@ -515,7 +522,7 @@ window.closeSettingsModal = function () {
 window.openCoreModal = function () {
     document.getElementById('coreModal').style.display = 'block';
 
-    // 💡 [여기 새로 추가] 창을 열 때, 아까 백업해둔 기존 코어 종목 리스트를 화면(모달)으로 불러옵니다.
+    // 창을 열 때, 아까 백업해둔 기존 코어 종목 리스트를 화면(모달)으로 불러옵니다.
     _coreStockList = [...(window.cachedCoreStocks || [])];
 
     renderCoreTags();
@@ -736,12 +743,9 @@ window.addCoreStock = function (ticker, name) {
 
 window.saveCoreStocks = async function () {
     const isMock = document.getElementById('modeSwitch').checked ? 1 : 0;
-
-    // [핵심 수정] 백엔드의 json.loads 형식과 호환되도록 완벽한 JSON 문자열로 인코딩합니다.
     const coreJsonStr = JSON.stringify(_coreStockList);
 
     const data = {
-        // [오류 수정] 존재하지 않던 기존 'kisAppKey' ID 대신 화면에 실재하는 정확한 실전/모의 ID들을 매칭합니다.
         real_app_key: document.getElementById('realAppKey').value,
         real_app_secret: document.getElementById('realAppSecret').value,
         real_account_no: document.getElementById('realAccountNo').value,
@@ -752,7 +756,7 @@ window.saveCoreStocks = async function () {
         telegram_token: document.getElementById('teleToken').value,
         telegram_chat_id: document.getElementById('teleChatId').value,
         gemini_api_key: document.getElementById('geminiApiKey').value,
-        core_stocks: coreJsonStr, // JSON 데이터 반영
+        core_stocks: coreJsonStr,
         is_mock: isMock
     };
     try {
@@ -765,7 +769,6 @@ window.saveCoreStocks = async function () {
         if (result.status === 'success') {
             alert('코어 종목이 변경되었습니다. 시스템에 반영 중입니다.');
             closeCoreModal();
-            // 페이지를 새로고침하거나 상태를 동기화하여 변경된 코어 카드가 바로 표시되도록 합니다.
             location.reload();
         } else { alert('저장 실패: ' + (result.message || '오류')); }
     } catch (e) { alert('서버 통신 오류'); }
@@ -773,8 +776,6 @@ window.saveCoreStocks = async function () {
 
 window.saveAccountSettings = async function () {
     const isMock = document.getElementById('modeSwitch').checked ? 1 : 0;
-
-    // [핵심 수정] 설정 저장 시에도 코어 종목 데이터 유실을 방지하기 위해 형식을 JSON 문자열로 일치시킵니다.
     const coreJsonStr = JSON.stringify(_coreStockList);
 
     const data = {
@@ -788,7 +789,7 @@ window.saveAccountSettings = async function () {
         telegram_token: document.getElementById('teleToken').value,
         telegram_chat_id: document.getElementById('teleChatId').value,
         gemini_api_key: document.getElementById('geminiApiKey').value,
-        core_stocks: coreJsonStr, // JSON 데이터 반영
+        core_stocks: coreJsonStr,
         is_mock: isMock
     };
     try {
@@ -800,7 +801,7 @@ window.saveAccountSettings = async function () {
         if (result.status === 'success') {
             alert('계좌 설정이 저장되었습니다.');
             closeSettingsModal();
-            location.reload(); // 변경된 계좌 정보에 기반한 잔고 갱신을 위해 새로고침 처리
+            location.reload();
         } else { alert('저장 실패'); }
     } catch (e) { alert('서버 통신 오류'); }
 }
