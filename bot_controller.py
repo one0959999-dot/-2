@@ -1025,6 +1025,12 @@ class BotController:
         self.scheduler.every().day.at("11:00").do(lambda: self._run_threaded(self.generate_daily_report))
         self.scheduler.every().day.at("09:05").do(lambda: self._run_threaded(self._rescreen_satellites))
         self.scheduler.every().friday.at("16:00").do(lambda: self._run_threaded(self._weekly_self_reflection))
+        
+        # 🟢 [개선 1 반영] 매일 오전 08:00 정각에 24시간 만료되는 웹소켓 접속키를 연장하고 소켓을 재부팅합니다.
+        self.scheduler.every().day.at("08:00").do(lambda: self._run_threaded(self.refresh_websocket))
+        
+        # 🟢 [개선 2 반영] 매주 토요일 새벽 02:00 정각에 200대 주도주 기반 딥러닝 훈련을 자율 실행하고 모델을 교체합니다.
+        self.scheduler.every().saturday.at("02:00").do(lambda: self._run_threaded(self.run_lstm_training))
 
         self.trading_job()  
         
@@ -1042,6 +1048,70 @@ class BotController:
         while self.is_running:
             self.scheduler.run_pending()
             time.sleep(1)
+    
+    def refresh_websocket(self):
+        """매일 새벽 호출되어 24시간 만료되는 웹소켓 암호키(Approval Key)를 자동으로 재발급하고 연결을 연장합니다."""
+        self.add_log("🔄 [웹소켓 키 연장] KIS 규정에 따른 24시간 만료 대비 실시간 웹소켓 재시작 루틴 가동...")
+        try:
+            if self.kis:
+                # 1. 기존 가동 중인 웹소켓 클라이언트 채널 안전하게 파괴
+                if self.ws_client and self.ws_client.ws:
+                    try:
+                        self.ws_client.ws.close()
+                    except Exception:
+                        pass
+                
+                # 2. 증권사로부터 새로운 24시간짜리 무적 접속 권한키 발급
+                app_key = self.kis.get_approval_key()
+                if app_key:
+                    def on_price_update(ticker, price):
+                        self.live_prices[ticker] = price
+                    
+                    # 기존에 실시간 감시하고 있던 종목 임시 백업
+                    old_subscribed = list(self.ws_client.subscribed_tickers) if self.ws_client else []
+                    
+                    from kis_websocket import KisWebSocket
+                    self.ws_client = KisWebSocket(app_key, is_mock=self._is_mock, price_callback=on_price_update)
+                    self.ws_client.start()
+                    
+                    # 네트워크 안정화 딜레이 부여 후 백업된 종목 실시간 채널 재구독 등록
+                    time.sleep(3.0)
+                    for t in old_subscribed:
+                        self.ws_client.subscribe(t)
+                        
+                    self.add_log("✅ [웹소켓 키 연장 완료] 새로운 암호키 갱신 및 기존 실시간 감시 채널 복구 전원 성공!")
+                    self._send_telegram("📡 실시간 웹소켓 전용 접속 키(Approval Key) 24시간 만료 전 자동 연장 및 재구독 성공!")
+                else:
+                    self.add_log("❌ [웹소켓 키 연장 실패] 증권사 공용 방화벽 인증 실패 (키 발급 거절).")
+        except Exception as e:
+            self.add_log(f"❌ [웹소켓 키 연장 오류] 자동 재연결 제어 장치 장애: {e}")
+
+    def run_lstm_training(self):
+        """매주 토요일 새벽 2시, 메인 프로세스 간섭 없이 독립된 서브 백그라운드로 딥러닝 모델 훈련 실행"""
+        self.add_log("🧠 [AI 자율 진화] 주말 자동화 스케줄러에 의해 시장 상위 200대 주도주 패턴 LSTM 재학습을 가동합니다.")
+        self._send_telegram("🧠 주말 AI 자율 진화 모드 시작: 코스피/코스닥 거래대금 최상위 200대 주도주 차트 빅데이터 딥러닝 훈련에 돌입합니다.")
+        
+        try:
+            import os
+            import sys
+            import subprocess
+            
+            # 현재 가동 중인 가상환경(venv) 내부의 진짜 파이썬 실행 파일 경로 추적
+            python_executable = sys.executable
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            script_path = os.path.join(base_dir, "train_lstm.py")
+            
+            # 💡 [메모리 수호] 훈련 연산 중 램 부족으로 메인 봇이 같이 기절하는 것을 원천 차단코자 독립 서브프로세스로 분리 격리 가동
+            result = subprocess.run([python_executable, script_path], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                self.add_log("✅ [AI 자율 진화 완료] 이번 주 주도주 200개 기반 LSTM 가중치 모델 파일(.pth) 자동 갱신 완료!")
+                self._send_telegram("🎉 [AI 자율 진화 완료] 이번 주 시장을 지배한 상위 200개 주식의 파동 패턴 완전 마스터 및 AI 매매 신경망 교체 성공!")
+            else:
+                self.add_log(f"❌ [AI 자율 진화 실패] train_lstm.py 학습 도중 오류가 검출되었습니다:\n{result.stderr}")
+                self._send_telegram("⚠️ [AI 자율 진화 실패] 주말 딥러닝 자율 학습 도중 에러가 발견되었습니다. (로그 확인 필요)")
+        except Exception as e:
+            self.add_log(f"❌ [AI 자율 진화 오류] 서브 프로세스 통제 장치 장애: {e}")
 
     def start(self, total_cash=10_000_000):
         if not self.kis:

@@ -8,63 +8,94 @@ from sklearn.preprocessing import MinMaxScaler
 from pykrx import stock
 from datetime import datetime, timedelta
 import os
+import time
 
 # 이전 단계에서 만든 딥러닝 모델 구조 불러오기
 from dl_model import StockLSTM
 
-print("🧠 [딥러닝 엔진] AI 모델 학습(Training) 스크립트를 시작합니다...")
+print("🧠 [딥러닝 엔진] AI 모델 양대 시장 상위 200대 주도주 결합 대형 학습을 시작합니다...")
 
-# 1. 학습용 우량주 및 주도주 유니버스 (데이터 수집용)
-TRAIN_TICKERS = ["005930", "000660", "035420", "005380", "068270", "003850", "035720", "051910"]
+# 1. 동적 유니버스 생성: 실행일 기준 KOSPI + KOSDAQ 거래대금 대통합 상위 200개 추출
+try:
+    # 최근 정상 영업일 날짜 확인용 (주말 및 휴일 장부 백업 방어코드)
+    dt = datetime.today()
+    today_str = dt.strftime("%Y%m%d")
+    for _ in range(10):
+        df_check = stock.get_market_ohlcv_by_date(today_str, today_str, "005930")
+        if not df_check.empty:
+            break
+        dt -= timedelta(days=1)
+        today_str = dt.strftime("%Y%m%d")
+
+    print(f"📅 데이터 스캔 타겟 기준 영업일: {today_str}")
+    df_kospi = stock.get_market_price_change_by_ticker(today_str, today_str, "KOSPI")
+    df_kosdaq = stock.get_market_price_change_by_ticker(today_str, today_str, "KOSDAQ")
+    df_all = pd.concat([df_kospi, df_kosdaq])
+    
+    # 거래대금 내림차순 정렬 후 최상위 200개 골라내기
+    top_200 = df_all.sort_values(by='거래대금', ascending=False).head(200)
+    TRAIN_TICKERS = top_200.index.tolist()
+    print(f"🔥 시장 최고 주도주 200 종목 리스트 수집 성공! (당일 거래대금 대장주: {top_200['종목명'].iloc[0]})")
+except Exception as universe_err:
+    print(f"⚠️ 상위 200개 실시간 추출 실패로 우량주 기본 가이드셋으로 대체합니다: {universe_err}")
+    TRAIN_TICKERS = ["005930", "000660", "035420", "005380", "068270", "003850", "035720", "051910"]
+
 SEQ_LENGTH = 20
 PREDICT_DAYS = 5
-EPOCHS = 50
+EPOCHS = 40  # 200개 종목의 빅데이터이므로 과적합 방지 및 연산 가용 한도 조율차 40 에포크로 최적화
 
 # 2. 데이터 수집 및 전처리
 all_x, all_y = [], []
 scaler = MinMaxScaler(feature_range=(-1, 1))
 
 end_date = datetime.today()
-start_date = end_date - timedelta(days=1500) # 약 4~5년 치 과거 데이터
+start_date = end_date - timedelta(days=1200) # t2.micro 사양 최적화를 위해 과거 1200일(약 3~4년) 패턴 추출
 
-print("📊 과거 차트 데이터를 수집하고 텐서(Tensor)로 변환 중...")
-for ticker in TRAIN_TICKERS:
+print("📊 200개 종목의 시계열 차트 빅데이터 병렬 스캔 및 정규화 진행 중...")
+for idx, ticker in enumerate(TRAIN_TICKERS, 1):
     try:
         df = stock.get_market_ohlcv_by_date(start_date.strftime("%Y%m%d"), end_date.strftime("%Y%m%d"), ticker)
-        if df.empty: continue
+        if df.empty or len(df) < (SEQ_LENGTH + PREDICT_DAYS + 10): 
+            continue
         
         df.rename(columns={'시가':'open','고가':'high','저가':'low','종가':'close','거래량':'volume'}, inplace=True)
         data = df[['open', 'high', 'low', 'close', 'volume']].values
         scaled_data = scaler.fit_transform(data)
         
-        # 시계열 시퀀스(20일)와 정답지(5일 뒤 주가 상승 여부) 생성
         for i in range(len(scaled_data) - SEQ_LENGTH - PREDICT_DAYS):
             seq = scaled_data[i : i + SEQ_LENGTH]
             current_close = df['close'].iloc[i + SEQ_LENGTH - 1]
             future_close = df['close'].iloc[i + SEQ_LENGTH + PREDICT_DAYS - 1]
             
-            # 5일 뒤 주가가 현재보다 2% 이상 오르면 정답(1), 아니면 오답(0)
+            # 5일 뒤 종가가 현재 종가 대비 2% 넘게 상승하면 진짜 상승 패턴(1.0), 아니면 소외 패턴(0.0)
             label = 1.0 if future_close > current_close * 1.02 else 0.0
-            
             all_x.append(seq)
             all_y.append(label)
-    except Exception as e:
-        print(f"[{ticker}] 데이터 수집 오류: {e}")
+            
+        if idx % 20 == 0:
+            print(f"   [진행률: {idx}/200] 차트 조각 분석 완료 (추출된 누적 학습 데이터: {len(all_x)}개)")
+        
+        # 🚨 [매우 중요] 거래소 서버의 요청 제한(IP Block)을 차단하기 위한 0.15초 안전 지연 버퍼
+        time.sleep(0.15)
+    except Exception:
+        continue
 
-# 파이토치 텐서로 변환
+if not all_x:
+    print("❌ 수집된 데이터셋 파편이 없어 인공지능 훈련을 중단합니다.")
+    exit()
+
 X_tensor = torch.FloatTensor(np.array(all_x))
 y_tensor = torch.FloatTensor(np.array(all_y)).unsqueeze(1)
 
-# 데이터로더 생성
 dataset = TensorDataset(X_tensor, y_tensor)
-dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
+dataloader = DataLoader(dataset, batch_size=128, shuffle=True) # 속도 극대화를 위해 대형 배치 설정
 
-# 3. 모델 초기화 및 학습(Training)
+# 3. 모델 초기화 및 순방향/역방향 오차 역전파 학습
 model = StockLSTM(input_size=5, hidden_layer_size=50, output_size=1)
-criterion = nn.BCELoss() # 확률(0~1) 예측용 오차 함수
+criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-print(f"🔥 총 {len(all_x)}개의 패턴 데이터를 학습합니다. (시간이 다소 소요됩니다)")
+print(f"🚀 총 {len(all_x)}개의 시계열 매수 타점 데이터 장부 구축 완료! PyTorch 인공지능 훈련을 개시합니다.")
 
 for epoch in range(EPOCHS):
     model.train()
@@ -77,11 +108,10 @@ for epoch in range(EPOCHS):
         optimizer.step()
         epoch_loss += loss.item()
     
-    if (epoch+1) % 10 == 0:
-        print(f" - Epoch [{epoch+1}/{EPOCHS}] Loss: {epoch_loss/len(dataloader):.4f}")
+    if (epoch+1) % 5 == 0:
+        print(f" 🎯 AI 학습 주기 [{epoch+1}/{EPOCHS}] 종합 손실도(Loss): {epoch_loss/len(dataloader):.4f}")
 
-# 4. 뇌(가중치 파일) 저장
+# 4. 자율 진화된 최종 가중치 뇌 파일 저장
 model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stock_lstm_model.pth")
 torch.save(model.state_dict(), model_path)
-print(f"🎉 학습 완료! 딥러닝 뇌 파일이 저장되었습니다: {model_path}")
-print("   이제 봇을 켜면 딥러닝 예측 확률(%)이 스크리너 점수에 자동 반영됩니다!")
+print(f"🎉 [대성공] 시장 주도주 200개의 혼이 담긴 신규 .pth 모델 교체 완료! 경로: {model_path}")
