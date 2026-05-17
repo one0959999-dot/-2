@@ -611,7 +611,8 @@ class BotController:
                     if getattr(self, 'peak_total_asset', 0) > 0:
                         mdd = ((current_total_asset / self.peak_total_asset) - 1) * 100
                         if mdd <= -10.0:
-                            msg = f"💥 [서킷브레이커 발동] 계좌 MDD {mdd:.2f}% 폭락! 보유 주식을 전량 매도하고 '관망 모드'로 전환합니다."
+                            # 🎯 로그 메시지 문구 변경 (순수 시장가 청산 명시)
+                            msg = f"💥 [서킷브레이커 발동] 계좌 MDD {mdd:.2f}% 폭락! 자산 수호를 위해 보유 주식을 순수 시장가로 즉시 청산합니다."
                             self.add_log(msg)
                             self._send_telegram(msg)
                             
@@ -619,17 +620,19 @@ class BotController:
                                 safe_core_positions = list(self.core_positions)
                             for core in safe_core_positions:
                                 if core.shares > 0:
-                                    self.kis.sell_market_order(core.ticker, core.shares)
-                                    self.add_log(f"   🔥 [긴급 청산] 코어 종목 {core.name} {core.shares}주 매도 완료")
+                                    # 🚨 변경: 하한가로 밀려서라도 무조건 즉시 체결되는 순수 시장가(01) 메서드 호출
+                                    self.kis.sell_panic_market_order(core.ticker, core.shares)
+                                    self.add_log(f"   🔥 [긴급 강제 청산] 코어 종목 {core.name} {core.shares}주 순수 시장가 매도 완료")
                                     
                             with self.lock:
                                 safe_satellite_items = list(self.satellite_positions.items())
                             for ticker, pos in safe_satellite_items:
                                 if pos.shares > 0:
-                                    self.kis.sell_market_order(ticker, pos.shares)
-                                    self.add_log(f"   🔥 [긴급 청산] 위성 종목 {pos.name} {pos.shares}주 매도 완료")
+                                    # 🚨 변경: 하한가로 밀려서라도 무조건 즉시 체결되는 순수 시장가(01) 메서드 호출
+                                    self.kis.sell_panic_market_order(ticker, pos.shares)
+                                    self.add_log(f"   🔥 [긴급 강제 청산] 위성 종목 {pos.name} {pos.shares}주 순수 시장가 매도 완료")
                             
-                            self._send_telegram("🚨 [청산 완료] 100% 현금화 완료. 시장이 바닥을 칠 때까지 매수를 멈춥니다.")
+                            self._send_telegram("🚨 [청산 완료] 전 자산 100% 현금화 완료. 안전 장부 모드로 전환합니다.")
                             self.is_crisis_mode = True 
                             return
             except Exception as e:

@@ -247,7 +247,7 @@ def ai_chat():
             context_lines = ["[📈 회원님이 궁금해하시는 종목의 실시간 데이터 분석 장부]"]
             for ticker, name in target_tickers:
                 # 120일 이동평균선을 정밀하게 계산하기 위해 넉넉히 150일치 차트 데이터를 가져옵니다.
-                ohlcv_df = fetch_ohlcv(ticker, days=150)
+                ohlcv_df = fetch_ohlcv(ticker, days=150, kis=bot.kis) # 👈 kis=bot.kis를 명시하여 완벽히 캐시 우회 처리!
                 if not ohlcv_df.empty:
                     latest_biz_date = ohlcv_df.index[-1].strftime("%Y%m%d")
                     fund_df = krx_stock.get_market_fundamental_by_ticker(latest_biz_date, latest_biz_date, ticker)
@@ -421,36 +421,23 @@ def set_keys():
 @app.route('/api/search/stock')
 @login_required
 def search_stock():
-    """웹 대시보드에서 코어 종목을 검색할 때 로컬 상장 데이터베이스에서 초고속으로 매칭해 줍니다."""
+    """웹 대시보드에서 코어 종목을 검색할 때 kis_api의 무적 네이버 우회망을 통해 실시간 초고속 검색합니다."""
     query = request.args.get('q', '').strip()
     if not query:
         return jsonify({"results": []})
         
     try:
-        from pykrx import stock as krx_stock
-        results = []
-        
-        # 유가증권시장(KOSPI)과 코스닥(KOSDAQ) 시장에 상장된 전체 종목코드 셋을 즉시 로드
-        tickers = krx_stock.get_market_ticker_list(market="ALL")
-        
-        for ticker in tickers:
-            name = krx_stock.get_market_ticker_name(ticker)
+        # 현재 로그인된 사용자의 실전/모의 봇 인스턴스를 가져옵니다.
+        bot = get_current_bot()
+        if bot and bot.kis:
+            # kis_api.py 내부에 개발자님이 이미 완벽하게 구축해 두신 무적 네이버 검색망 호출!
+            results = bot.kis.search_stock_name(query)
+            return jsonify({"results": results})
             
-            # 유저 검색어가 6자리 종목코드 번호에 포함되거나 종목명 이름에 포함되는 경우 (대소문자 완전 무시)
-            if query in ticker or query.lower() in name.lower():
-                results.append({
-                    "ticker": ticker,
-                    "name": name
-                })
-                
-                # 검색 결과가 너무 많을 경우 성능 저하를 방지하기 위해 상위 30개로 표기 한계점 차단
-                if len(results) >= 30:
-                    break
-                    
-        return jsonify({"results": results})
     except Exception as e:
-        print(f"⚠️ 로컬 주식 통합 데이터셋 검색 중 시스템 예외 발생: {e}")
-        return jsonify({"results": []})
+        print(f"⚠️ 코어 종목 실시간 검색 중 예외 발생: {e}")
+        
+    return jsonify({"results": []})
 
 if __name__ == '__main__':
     init_db()
