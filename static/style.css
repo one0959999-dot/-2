@@ -1240,17 +1240,6 @@ body.theme-warm-beige .muted-center {
     -webkit-text-fill-color: var(--text-primary) !important;
 }
 
-/* 6. 🛠️ +- 수익률, 손실률 글자색도 모두 일관된 검은색 계열로 덮어쓰기 (가독성 최우선) */
-body.theme-warm-beige #total-pnl,
-body.theme-warm-beige #chart-monthly-pnl,
-body.theme-warm-beige #chart-yearly-pnl,
-body.theme-warm-beige #chart-total-pnl,
-body.theme-warm-beige td[style*="color"],
-body.theme-warm-beige span[style*="color"] {
-    color: var(--text-primary) !important;
-    -webkit-text-fill-color: var(--text-primary) !important;
-}
-
 /* 7. 부차적인 세부 설명 및 시간표시 글자색 회색조 개별 격리 */
 body.theme-warm-beige p,
 body.theme-warm-beige small,
@@ -1287,4 +1276,31 @@ body.theme-warm-beige .sat-table th {
 
 body.theme-warm-beige .sat-table td {
     border-bottom: 1px solid #e2e8f0 !important;
+}
+
+/* 9. 🛠️ 수익(+빨강) / 손실(-파랑) 색상 강제 복구 (가독성 높은 진한 색상으로 매핑) */
+
+/* 자바스크립트가 칠하는 빨간색(수익) 인지 및 복구 */
+body.theme-warm-beige [style*="color: #f85149"],
+body.theme-warm-beige [style*="color:#f85149"] {
+    color: #dc2626 !important;
+    /* 베이지 배경에 잘 보이는 찐한 빨강 */
+    -webkit-text-fill-color: #dc2626 !important;
+    font-weight: 700 !important;
+}
+
+/* 자바스크립트가 칠하는 파란색(손실) 인지 및 복구 */
+body.theme-warm-beige [style*="color: #58a6ff"],
+body.theme-warm-beige [style*="color:#58a6ff"] {
+    color: #2563eb !important;
+    /* 베이지 배경에 잘 보이는 찐한 파랑 */
+    -webkit-text-fill-color: #2563eb !important;
+    font-weight: 700 !important;
+}
+
+/* 자바스크립트가 칠하는 회색(0% 등) 인지 및 복구 */
+body.theme-warm-beige [style*="color: #8b949e"],
+body.theme-warm-beige [style*="color:#8b949e"] {
+    color: #64748b !important;
+    -webkit-text-fill-color: #64748b !important;
 }
