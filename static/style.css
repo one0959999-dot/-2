@@ -1161,8 +1161,6 @@ body.theme-warm-beige {
     /* 완전 무결한 짙은 검은색 계열 */
     --text-secondary: #475569;
     /* 가독성 확보된 짙은 회색 계열 */
-    --accent-blue: #1d4ed8;
-    --accent-purple: #6d28d9;
 
     background: var(--bg-primary) !important;
     color: var(--text-primary) !important;
@@ -1189,14 +1187,38 @@ body.theme-warm-beige .sat-table tr:hover {
     background: rgba(255, 255, 255, 1) !important;
 }
 
-/* 정지 버튼 모의투자 전용 배경색 스위칭 */
-body.theme-warm-beige .btn-stopped {
-    background: #e2e8f0 !important;
-    border-color: #cbd5e1 !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+/* 3. 🛠️ 상단 네비게이션 버튼(오늘의 리포트, 계좌설정, 로그아웃) 명확한 가독성 보장 */
+body.theme-warm-beige .navbar a,
+body.theme-warm-beige .navbar button,
+body.theme-warm-beige .nav-user a,
+body.theme-warm-beige .nav-user button,
+body.theme-warm-beige .btn-settings {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+    -webkit-text-fill-color: #0f172a !important;
+    padding: 6px 12px;
 }
 
-/* 3. [글자 독립] 모의투자 모드일 때 대시보드 내 "모든 텍스트" 색상 검은색 계열 강제 전환 */
+body.theme-warm-beige .navbar a:hover,
+body.theme-warm-beige .navbar button:hover,
+body.theme-warm-beige .nav-user a:hover,
+body.theme-warm-beige .btn-settings:hover {
+    background: #f1f5f9 !important;
+    border-color: #94a3b8 !important;
+}
+
+/* 4. 그라데이션 텍스트(제목, 강조 숫자) 배경 텍스처만 선택적 삭제하여 블랙 텍스트화 */
+body.theme-warm-beige h1,
+body.theme-warm-beige .card-value.highlight {
+    background: none !important;
+    -webkit-text-fill-color: var(--text-primary) !important;
+}
+
+/* 5. 🛠️ [글자 독립] 대시보드 내 "모든 텍스트" 색상 검은색 강제 전환 (스위치 배경 보호) */
 body.theme-warm-beige h1,
 body.theme-warm-beige h2,
 body.theme-warm-beige h3,
@@ -1207,7 +1229,7 @@ body.theme-warm-beige td,
 body.theme-warm-beige b,
 body.theme-warm-beige strong,
 body.theme-warm-beige small,
-body.theme-warm-beige span:not(.toggle-dot):not(.chat-status-dot),
+body.theme-warm-beige span:not(.slider):not(.toggle-dot):not(.chat-status-dot):not(.badge),
 body.theme-warm-beige .card-value,
 body.theme-warm-beige .card-subvalue,
 body.theme-warm-beige .mini-log-entry,
@@ -1216,11 +1238,20 @@ body.theme-warm-beige .chat-msg-time,
 body.theme-warm-beige .muted-center {
     color: var(--text-primary) !important;
     -webkit-text-fill-color: var(--text-primary) !important;
-    background: none !important;
-    /* 실전투자 다크모드 전용 그라데이션 글자색 제거 */
 }
 
-/* 4. 부차적인 세부 설명 및 시간표시 글자색 회색조 개별 격리 */
+/* 6. 🛠️ +- 수익률, 손실률 글자색도 모두 일관된 검은색 계열로 덮어쓰기 (가독성 최우선) */
+body.theme-warm-beige #total-pnl,
+body.theme-warm-beige #chart-monthly-pnl,
+body.theme-warm-beige #chart-yearly-pnl,
+body.theme-warm-beige #chart-total-pnl,
+body.theme-warm-beige td[style*="color"],
+body.theme-warm-beige span[style*="color"] {
+    color: var(--text-primary) !important;
+    -webkit-text-fill-color: var(--text-primary) !important;
+}
+
+/* 7. 부차적인 세부 설명 및 시간표시 글자색 회색조 개별 격리 */
 body.theme-warm-beige p,
 body.theme-warm-beige small,
 body.theme-warm-beige .card-subvalue,
@@ -1231,9 +1262,12 @@ body.theme-warm-beige .muted-center {
     -webkit-text-fill-color: var(--text-secondary) !important;
 }
 
-/* 5. 예외 요소 및 기능 배지 글자색 최종 보정 */
+/* 8. 예외 요소(정지 버튼, 뱃지, 테이블 테두리) 최종 보정 */
 body.theme-warm-beige .btn-stopped {
+    background: #e2e8f0 !important;
+    border-color: #cbd5e1 !important;
     color: var(--text-primary) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
 }
 
 body.theme-warm-beige .btn-stopped .toggle-dot {
