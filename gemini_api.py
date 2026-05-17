@@ -97,8 +97,13 @@ class GeminiApi:
 ]"""
         try:
             res = self.generate_content(prompt)
-            # 마크다운 코드 블록 제거 후 JSON 파싱
-            json_str = res.replace("```json", "").replace("```", "").strip()
+            # 마크다운 코드 블록 제거 후 정규식으로 JSON 배열만 안전하게 추출
+            import re
+            match = re.search(r'\[.*\]', res, re.DOTALL)
+            if match:
+                json_str = match.group(0)
+            else:
+                json_str = "[]"
             selected_data = json.loads(json_str)
             
             final_selection = []

@@ -27,24 +27,26 @@ def calc_rsi(series, period=RSI_PERIOD):
     return 100 - 100 / (1 + gain / (loss + 1e-10))
 
 
-def get_recent_prices(ticker, days=30):
-    """최근 N일 종가 Series 반환 (pykrx 사용)"""
-    end   = datetime.today()
-    start = end - timedelta(days=days + 20)
-    df = stock.get_market_ohlcv_by_date(
-        start.strftime("%Y%m%d"),
-        end.strftime("%Y%m%d"),
-        ticker
-    )
-    return df['종가'].dropna().tail(days)
+def get_recent_prices(ticker, kis_api=None, days=30):
+    """최근 N일 종가 Series 반환 (KIS API 사용)"""
+    if kis_api is None:
+        import pandas as pd
+        return pd.Series(dtype=float)
+        
+    df = kis_api.get_ohlcv(ticker, "D")
+    if df.empty or 'close' not in df.columns:
+        import pandas as pd
+        return pd.Series(dtype=float)
+        
+    return df['close'].dropna().tail(days)
 
 
-def get_rsi_signal(ticker):
+def get_rsi_signal(ticker, kis_api=None):
     """
     RSI(9) 기반 현재 매매 신호 반환 (떨어지는 칼날 방지 로직 적용)
     Returns: ('BUY' | 'SELL' | 'HOLD', current_price, rsi_value)
     """
-    prices = get_recent_prices(ticker, days=30)
+    prices = get_recent_prices(ticker, kis_api, days=30)
     if len(prices) < RSI_PERIOD + 2:
         return 'HOLD', 0, 0
 
@@ -64,24 +66,20 @@ def get_rsi_signal(ticker):
     return 'HOLD', price, current_rsi
 
 
-def get_signal_by_strategy(ticker, strategy_name):
+def get_signal_by_strategy(ticker, strategy_name, kis_api=None):
     """
-    전략 이름에 따라 실시간 매매 신호 생성
+    전략 이름에 따라 실시간 매매 신호 생성 (KIS API 연동)
     Returns: ('BUY' | 'SELL' | 'HOLD', price, indicator_value)
     """
-    from pykrx import stock as krx_stock
-    from datetime import timedelta
+    if kis_api is None:
+        return 'HOLD', 0, 0
 
-    end   = datetime.now()
-    start = end - timedelta(days=90)
-    df = krx_stock.get_market_ohlcv_by_date(
-        start.strftime("%Y%m%d"),
-        end.strftime("%Y%m%d"),
-        ticker
-    )
-    # ETF 종목일 경우 시고저종 컬럼명이 다를 수 있으므로 안전하게 처리
-    if not df.empty and '종가' in df.columns:
-        df.rename(columns={'시가':'open','고가':'high','저가':'low','종가':'close','거래량':'volume'}, inplace=True)
+    # pykrx 대신 KIS API의 get_ohlcv를 사용하여 과거 100일치 데이터를 가져옵니다.
+    df = kis_api.get_ohlcv(ticker, "D")
+    
+    if df.empty or 'close' not in df.columns:
+        return 'HOLD', 0, 0
+        
     df = df.dropna(subset=['close'])
 
     if len(df) < 25:

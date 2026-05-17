@@ -372,5 +372,61 @@ class KisApi:
             print(f"[KIS] 거래량 상위 검색 오류: {e}")
         return []
 
+    def get_ohlcv(self, stock_code: str, period: str = "D"):
+        """
+        국내주식 기간별 시세 조회 (FHKST03010100) - 과거 차트 데이터
+        period: "D"(일봉), "W"(주봉), "M"(월봉)
+        """
+        if not self._ensure_token():
+            return None
+            
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
+        headers = {
+            "content-type": "application/json; charset=utf-8",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret,
+            "tr_id": "FHKST03010100"
+        }
+        
+        # 오늘 날짜와 100일 전 날짜 계산
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=100)
+        
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": stock_code,
+            "FID_INPUT_DATE_1": start_dt.strftime("%Y%m%d"),
+            "FID_INPUT_DATE_2": end_dt.strftime("%Y%m%d"),
+            "FID_PERIOD_DIV_CODE": period,
+            "FID_ORG_ADJ_PRC": "0" # 0: 수정주가, 1: 원주가
+        }
+        
+        try:
+            res = requests.get(url, headers=headers, params=params, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                if data.get('rt_cd') == '0':
+                    output2 = data.get('output2', [])
+                    if not output2:
+                        return pd.DataFrame()
+                        
+                    # DataFrame으로 변환 및 타입 캐스팅
+                    df = pd.DataFrame(output2)
+                    df = df[['stck_bsop_date', 'stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_clpr', 'acml_vol']]
+                    df.columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+                    
+                    df['date'] = pd.to_datetime(df['date'])
+                    df[['open', 'high', 'low', 'close', 'volume']] = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+                    
+                    # 과거 날짜가 위로 오도록 오름차순 정렬
+                    df = df.sort_values('date').reset_index(drop=True)
+                    return df
+            print(f"[KIS] 기간별 시세 조회 실패: {res.text}")
+            return pd.DataFrame()
+        except Exception as e:
+            print(f"[KIS] 기간별 시세 조회 오류: {e}")
+            return pd.DataFrame()
+
 if __name__ == '__main__':
     pass

@@ -60,6 +60,9 @@ class BotController:
         
         # 일일 시장 분석 리포트 (대시보드 팝업용)
         self.daily_report = None
+        
+        # pykrx 펀더멘털 데이터 1일 1회 캐싱용 딕셔너리
+        self.fundamental_cache = {}
 
         # API 연동 객체
         self.kis = None
@@ -132,15 +135,54 @@ class BotController:
 
     def _sync_internal_balances(self, real_balance):
         """한투증권 실제 데이터셋을 가상 포지션 자산 장부에 완벽히 이식하는 공통 로직"""
-        try:
-            if not real_balance or 'stocks' not in real_balance: return
-            real_cash = float(real_balance.get('total_cash', 0))
-            real_stock_value = float(real_balance.get('total_value', 0))
-            total_equity = real_cash + real_stock_value
-            
-            # 💡 [버그 해결] 가짜 장부를 버리고 모의/실전 무관하게 한투증권 앱의 '진짜 잔고'를 그대로 가져옵니다.
-            # 어플 잔고가 0원이면 봇의 예산도 0원으로 정확하게 동기화됩니다.
-            if total_equity >= 0:
+        with self.lock:
+            try:
+                if not real_balance or 'stocks' not in real_balance: return
+                real_cash = float(real_balance.get('total_cash', 0))
+                real_stock_value = float(real_balance.get('total_value', 0))
+                total_equity = real_cash + real_stock_value
+                
+                # 💡 [버그 해결] 가짜 장부를 버리고 모의/실전 무관하게 한투증권 앱의 '진짜 잔고'를 그대로 가져옵니다.
+                # 어플 잔고가 0원이면 봇의 예산도 0원으로 정확하게 동기화됩니다.
+                if total_equity >= 0:
+                    target_core_pool = total_equity * CORE_RATIO
+                    target_sat_pool = total_equity * SATELLITE_RATIO
+                    
+                    current_core_stock_val = sum([float(s['value']) for s in real_balance['stocks'] if any(c.ticker == s['ticker'] for c in self.core_positions)])
+                    per_core_cash = max(0.0, (target_core_pool - current_core_stock_val) / max(1, len(self.core_positions)))
+                    for core in self.core_positions:
+                        core.cash = round(per_core_cash, 2)
+                        
+                    current_sat_stock_val = sum([float(s['value']) for s in real_balance['stocks'] if s['ticker'] in self.satellite_positions])
+                    total_sat_cash = max(0.0, target_sat_pool - current_sat_stock_val)
+                    empty_sat_count = sum(1 for sat in self.satellite_positions.values() if int(sat.shares) == 0)
+                    
+                    for t, sat in self.satellite_positions.items():
+                        if int(sat.shares) > 0: sat.cash = 0.0
+                        else: sat.cash = round(total_sat_cash / max(1, empty_sat_count), 2)
+
+                for core in self.core_positions: core.shares = 0
+                for sat in self.satellite_positions.values(): sat.shares = 0
+
+                for real_stock in real_balance['stocks']:
+                    t = real_stock['ticker']
+                    q = int(real_stock['shares'])
+                    p = float(real_stock['purchase_price'])
+
+                    for core in self.core_positions:
+                        if core.ticker == t:
+                            core.shares = q
+                            core.avg_price = p
+                            if core.floor_shares == 0 and q > 0:
+                                core.floor_shares = max(1, int(q * CORE_MIN_FLOOR_RATIO))
+                            break
+
+                    if t in self.satellite_positions:
+                        sat = self.satellite_positions[t]
+                        sat.shares = q
+                        sat.avg_price = p
+            except Exception:
+                pass
                 target_core_pool = total_equity * CORE_RATIO
                 target_sat_pool = total_equity * SATELLITE_RATIO
                 
@@ -481,93 +523,23 @@ class BotController:
         else:
             self.add_log(f"--- 🎯 골든 타임 매수/매도 전면 점검 ({current_time_str}) ---")
 
-        # [핵심 리팩토링] 매 사이클마다 한투증권(KIS)의 실제 예수금과 보유 주식 데이터를 가져와 시스템 장부를 강제 동기화합니다.
-        # ... (이하 기존 코드 동일) ...
-        # 이로 인해 수수료, 세금, 미체결 등으로 인한 장부 왜곡 및 예수금 부족으로 인한 주문 에러를 원천 차단합니다.
+        # [핵심 리팩토링] 하드코딩된 중복 잔고 동기화 로직 제거 및 통합 함수 호출
+        # 이미 완벽하게 구현된 _sync_internal_balances 함수를 재사용하여 트래픽 낭비를 줄입니다.
         if self.kis:
             try:
                 real_balance = self.kis.get_account_balance()
                 if real_balance and 'stocks' in real_balance:
-                    # 1. [구조 개혁] 전체 자산 평가액(현금+주식) 기준 정밀 타겟 배분 방식으로 교체합니다.
-                    real_cash = float(real_balance.get('total_cash', 0))
-                    real_stock_value = float(real_balance.get('total_value', 0))
-                    total_equity = real_cash + real_stock_value  # 계좌의 순수 총 자산 가치
-                    
-                    if total_equity > 0:
-                        # CORE_RATIO(0.3)와 SATELLITE_RATIO(0.7)에 따른 이상적인 방별 목표 자산 정의
-                        target_core_pool = total_equity * CORE_RATIO
-                        target_sat_pool = total_equity * SATELLITE_RATIO
-                        
-                        # 1-A. 실제 증권사 데이터로부터 코어 주식들의 평가 금액 총합 계산
-                        current_core_stock_val = 0
-                        for real_stock in real_balance['stocks']:
-                            t = real_stock['ticker']
-                            for core in self.core_positions:
-                                if core.ticker == t:
-                                    current_core_stock_val += float(real_stock['value'])
-                                    break
-                                    
-                        # 코어 방에 배정되어야 할 정확한 잔여 현금 계산 (목표 자산 - 현재 주식 가치)
-                        # 코어 종목 수에 맞춰 균등 분배하되, 최소 0원 이하로 떨어지지 않도록 방어합니다.
-                        per_core_cash = max(0.0, (target_core_pool - current_core_stock_val) / max(1, len(self.core_positions)))
-                        for core in self.core_positions:
-                            core.cash = round(per_core_cash, 2)
-                            
-                        # 1-B. 실제 증권사 데이터로부터 위성 주식들의 평가 금액 총합 계산
-                        current_sat_stock_val = 0
-                        for real_stock in real_balance['stocks']:
-                            t = real_stock['ticker']
-                            if t in self.satellite_positions:
-                                current_sat_stock_val += float(real_stock['value'])
-                                
-                        # 위성 전체 방에 남아야 할 잔여 현금 계산
-                        total_sat_cash = max(0.0, target_sat_pool - current_sat_stock_val)
-                        
-                        # 각 위성 슬롯별 가용 예산 분배 (기존에 주식을 안 들고 있는 슬롯에 현금 집중)
-                        # 주식을 들고 있는 위성은 예산이 주식에 묶여 있으므로 가용 현금을 0에 가깝게 리셋하여 중복 매수를 막고,
-                        # 주식이 없는 빈 슬롯은 다음 매수를 원활히 할 수 있도록 남은 현금을 정교하게 채워넣습니다.
-                        empty_sat_count = sum(1 for sat in self.satellite_positions.values() if int(sat.shares) == 0)
-                        
-                        for t, sat in self.satellite_positions.items():
-                            if int(sat.shares) > 0:
-                                sat.cash = 0.0  # 이미 주식으로 들고 있으므로 가용 현금 비움
-                            else:
-                                # 주식이 없는 빈 슬롯들이 남은 위성 예수금을 나눠 갖도록 매칭
-                                sat.cash = round(total_sat_cash / max(1, empty_sat_count), 2)
-
-                    # 2. 실제 보유 주식 수(shares) 및 평균 매입단가(avg_price) 동기화
-                    # 장부를 먼저 0으로 클리어한 후 실제 증권사 데이터만 매칭 주입합니다.
-                    for core in self.core_positions:
-                        core.shares = 0
-                    for sat in self.satellite_positions.values():
-                        sat.shares = 0
-
-                    for real_stock in real_balance['stocks']:
-                        t = real_stock['ticker']
-                        q = int(real_stock['shares'])
-                        p = float(real_stock['purchase_price'])
-
-                        # 코어 종목 실제 수량 매칭
-                        for core in self.core_positions:
-                            if core.ticker == t:
-                                core.shares = q
-                                core.avg_price = p
-                                if core.floor_shares == 0 and q > 0:
-                                    core.floor_shares = max(1, int(q * CORE_MIN_FLOOR_RATIO))
-                                break
-
-                        # 위성 종목 실제 수량 매칭
-                        if t in self.satellite_positions:
-                            sat = self.satellite_positions[t]
-                            sat.shares = q
-                            sat.avg_price = p
-                            
+                    self._sync_internal_balances(real_balance)
                     self.add_log("🔄 [잔고 동기화 완료] 실제 계좌의 실시간 자산 데이터가 가상 장부에 연동되었습니다.")
             except Exception as e:
                 self.add_log(f"⚠️ [잔고 동기화 실패] 증권사 잔고 로드 실패 (안전을 위해 기존 데이터로 대치): {e}")
 
         # ── 코어 현재가 및 신호 점검 ──
-        for core in self.core_positions:
+        # 🔒 안전한 반복과 주문을 위해 락을 걸어 데이터를 보호합니다.
+        with self.lock:
+            safe_core_positions = list(self.core_positions)
+            
+        for core in safe_core_positions:
             cp = self.kis.get_current_price(core.ticker) if self.kis else None
             if not cp: continue
             core._last_price = cp  # [추가] 대시보드 웹 화면에 실시간 현재가가 정상 출력되도록 바인딩합니다.
@@ -579,9 +551,9 @@ class BotController:
                 f"× {cp:,}원 = {core_val:,}원"
             )
 
-            # 코어 매매 로직 (RSI)
+            # 코어 매매 로직 (RSI) - KIS API 객체 전달
             try:
-                core_signal, _, core_rsi = get_rsi_signal(core.ticker)
+                core_signal, _, core_rsi = get_rsi_signal(core.ticker, kis_api=self.kis)
 
                 if core_signal == 'BUY' and core.cash >= (cp or 1):
                     qty = core.buy(cp)
@@ -618,23 +590,35 @@ class BotController:
         for ticker, pos in trading_sat_items:
             try:
                 strat_name = self.satellite_strategies.get(ticker, 'RSI(9) 30/70')
-                signal, price, ind_val = get_signal_by_strategy(ticker, strat_name)
+                # 💡 pykrx 대신 한투 KIS API 객체를 전달하여 안전하게 과거 시세를 조회합니다.
+                signal, price, ind_val = get_signal_by_strategy(ticker, strat_name, kis_api=self.kis)
                 if price > 0:
                     pos._last_price = price  # 대시보드 웹 화면에 위성 종목 현재가가 정상 출력되도록 바인딩합니다.
 
-                # 💡 [AI 뇌 확장] 차트만 보는 것을 막기 위해 실시간 펀더멘털 데이터를 긁어와 AI에게 같이 넘겨줍니다.
-                financial_data = "재무 데이터 조회 불가"
-                try:
-                    from pykrx import stock as krx_stock
-                    from datetime import timedelta
-                    latest_date = krx_stock.get_business_days_dates(datetime.now() - timedelta(days=7), datetime.now())[-1]
-                    fund_df = krx_stock.get_market_fundamental_by_ticker(latest_date.strftime("%Y%m%d"), latest_date.strftime("%Y%m%d"), ticker)
-                    if not fund_df.empty:
-                        per = fund_df.loc[ticker, 'PER']
-                        pbr = fund_df.loc[ticker, 'PBR']
-                        financial_data = f"PER: {per:.2f}배, PBR: {pbr:.2f}배"
-                except Exception:
-                    pass
+                # 💡 [AI 뇌 확장 & IP 차단 방지] pykrx 펀더멘털 조회는 하루 1회 캐싱된 데이터만 사용합니다.
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                cache_key = f"{ticker}_{today_str}"
+                
+                # 안전하게 캐시 딕셔너리 초기화 확인
+                if not hasattr(self, 'fundamental_cache'):
+                    self.fundamental_cache = {}
+                    
+                if cache_key in self.fundamental_cache:
+                    financial_data = self.fundamental_cache[cache_key]
+                else:
+                    financial_data = "재무 데이터 조회 불가"
+                    try:
+                        from pykrx import stock as krx_stock
+                        from datetime import timedelta
+                        latest_date = krx_stock.get_business_days_dates(datetime.now() - timedelta(days=7), datetime.now())[-1]
+                        fund_df = krx_stock.get_market_fundamental_by_ticker(latest_date.strftime("%Y%m%d"), latest_date.strftime("%Y%m%d"), ticker)
+                        if not fund_df.empty:
+                            per = fund_df.loc[ticker, 'PER']
+                            pbr = fund_df.loc[ticker, 'PBR']
+                            financial_data = f"PER: {per:.2f}배, PBR: {pbr:.2f}배"
+                            self.fundamental_cache[cache_key] = financial_data # 하루 1번만 가져오고 캐시 저장
+                    except Exception:
+                        pass
 
                 # 🔴 [필수 추가] 하드 손절선(Hard Stop-Loss) 로직 (-5% 하락 시 기계적 매도)
                 if pos.shares > 0 and pos.avg_price > 0:
@@ -747,10 +731,8 @@ class BotController:
                             if self.telegram:
                                 self.telegram.send_message(msg_dist)
                 else:
-                    # 매수/매도 조건이 아닐 때 HOLD 로그 
-                    pass 
-                    # 횡보장에서도 로그가 너무 많이 쌓이는 것을 막기 위해 HOLD 로그 출력 생략 또는 유지 가능
-                    # self.add_log(f"  [{pos.name}] HOLD [{strat_name} → {ind_val:.1f}]")
+                    # 매수/매도 조건이 아닐 때 HOLD 로그 생략
+                    pass
 
             except Exception as e:
                 self.add_log(f"⚠️ [{ticker}] 오류: {e}")
