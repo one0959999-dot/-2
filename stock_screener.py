@@ -425,13 +425,14 @@ def select_satellites(kis=None, n=NUM_SATELLITES, verbose=True, gemini_client=No
     from dl_model import DeepLearningPredictor
     dl_predictor = DeepLearningPredictor()
 
+    # ── Step 4: 후보별 백테스트 + 종합 점수 ──
     results = []
     processed = 0
 
     for ticker in candidate_pool:
         try:
             name = stock.get_market_ticker_name(ticker)
-            # 🟢 fetch_ohlcv 뒤에 ', kis=kis' 를 추가하여 정식 API를 타도록 강제합니다.
+            # 🟢 kis=kis 파라미터를 주입하여 pykrx 크롤링을 건너뛰고 한국투자증권 공식 API 인프라를 타도록 변경
             df   = fetch_ohlcv(ticker, days=BACKTEST_DAYS, kis=kis) 
             if len(df) < 40 or 'close' not in df.columns:
                 continue
