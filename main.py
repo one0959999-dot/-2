@@ -63,14 +63,16 @@ def main():
     
     telegram_instance.send_message("자동매매 봇이 정상적으로 시작되었습니다.")
     
-    # 스케줄러 설정 (일단 10초마다 실행해서 테스트)
-    schedule.every(10).seconds.do(trading_job)
+    # 🛠️ [버그 수정] 전역 schedule 대신 메인 전용 독립 스케줄러 객체를 명시적으로 생성하여 격리
+    main_scheduler = schedule.Scheduler()
+    main_scheduler.every(10).seconds.do(trading_job)
     
     print("스케줄러가 시작되었습니다. 대기 중...")
     
     try:
         while True:
-            schedule.run_pending()
+            # 🛠️ 격리된 메인 스케줄러만 실행하여 BotController 내부 스케줄러와의 상호 간섭을 원천 차단
+            main_scheduler.run_pending()
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n프로그램을 종료합니다.")

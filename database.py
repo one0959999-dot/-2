@@ -9,7 +9,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'lassi.db')
 
 def get_db_connection():
-    # 💡 단순히 'lassi.db'가 아닌 절대 경로(DB_PATH)를 바라보도록 수정합니다.
+    """데이터베이스 연결 객체를 생성합니다."""
+    # 💡 절대 경로(DB_PATH) 지정 및 멀티스레드 환경 안정성을 위한 옵션(check_same_thread, timeout) 통합 적용
     conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15.0)
     conn.row_factory = sqlite3.Row
     return conn

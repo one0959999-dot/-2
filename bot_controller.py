@@ -181,46 +181,8 @@ class BotController:
                         sat = self.satellite_positions[t]
                         sat.shares = q
                         sat.avg_price = p
-            except Exception:
-                pass
-                target_core_pool = total_equity * CORE_RATIO
-                target_sat_pool = total_equity * SATELLITE_RATIO
-                
-                current_core_stock_val = sum([float(s['value']) for s in real_balance['stocks'] if any(c.ticker == s['ticker'] for c in self.core_positions)])
-                per_core_cash = max(0.0, (target_core_pool - current_core_stock_val) / max(1, len(self.core_positions)))
-                for core in self.core_positions:
-                    core.cash = round(per_core_cash, 2)
-                    
-                current_sat_stock_val = sum([float(s['value']) for s in real_balance['stocks'] if s['ticker'] in self.satellite_positions])
-                total_sat_cash = max(0.0, target_sat_pool - current_sat_stock_val)
-                empty_sat_count = sum(1 for sat in self.satellite_positions.values() if int(sat.shares) == 0)
-                
-                for t, sat in self.satellite_positions.items():
-                    if int(sat.shares) > 0: sat.cash = 0.0
-                    else: sat.cash = round(total_sat_cash / max(1, empty_sat_count), 2)
-
-            for core in self.core_positions: core.shares = 0
-            for sat in self.satellite_positions.values(): sat.shares = 0
-
-            for real_stock in real_balance['stocks']:
-                t = real_stock['ticker']
-                q = int(real_stock['shares'])
-                p = float(real_stock['purchase_price'])
-
-                for core in self.core_positions:
-                    if core.ticker == t:
-                        core.shares = q
-                        core.avg_price = p
-                        if core.floor_shares == 0 and q > 0:
-                            core.floor_shares = max(1, int(q * CORE_MIN_FLOOR_RATIO))
-                        break
-
-                if t in self.satellite_positions:
-                    sat = self.satellite_positions[t]
-                    sat.shares = q
-                    sat.avg_price = p
-        except Exception:
-            pass
+            except Exception as e:
+                self.add_log(f"⚠️ 내부 장부 동기화 중 오류 발생: {e}")
 
     def _init_dummy_cores(self):
         """정지 상태에서도 코어 종목을 화면에 표시하기 위해 초기 세팅 및 KIS 잔고 동기화"""
@@ -594,7 +556,11 @@ class BotController:
                 signal, price, ind_val = get_signal_by_strategy(ticker, strat_name, kis_api=self.kis)
                 if price > 0:
                     pos._last_price = price  # 대시보드 웹 화면에 위성 종목 현재가가 정상 출력되도록 바인딩합니다.
+                # 🟢 [신규 추가 코드] 거시경제 매크로 데이터 확보 및 전략 문장 결합
+                macro_context = self.kis.get_macro_context() if self.kis else "시황 정보 없음"
+                extended_strategy = f"{strat_name} | 실시간 재무상태: {financial_data} | 현재 거시 시황: {macro_context}"
 
+                # 🔴 [필수 추가] 하드 손절선(Hard Stop-Loss) 로직 (-5% 하락 시 기계적 매도)
                 # 💡 [AI 뇌 확장 & IP 차단 방지] pykrx 펀더멘털 조회는 하루 1회 캐싱된 데이터만 사용합니다.
                 today_str = datetime.now().strftime('%Y-%m-%d')
                 cache_key = f"{ticker}_{today_str}"
@@ -619,6 +585,27 @@ class BotController:
                             self.fundamental_cache[cache_key] = financial_data # 하루 1번만 가져오고 캐시 저장
                     except Exception:
                         pass
+
+                    # 🟢 [신규 추가 코드] 트레일링 스탑 (고점 대비 -3% 추적 청산)
+                if pos.shares > 0 and price > 0:
+                    # 매수 이후 최고가 갱신
+                    if price > pos.max_price:
+                        pos.max_price = price
+                    
+                    # 평균 매수가 대비 5% 이상 수익권에 진입한 적이 있는 종목이
+                    # 당기 최고점 대비 3% 이상 주가가 흘러내렸을 때 보수적 익절 단행
+                    if pos.max_price >= pos.avg_price * 1.05:
+                        if price <= pos.max_price * 0.97:
+                            reason = "트레일링 스탑 (최고점 대비 -3% 이탈)"
+                            self.add_log(f"🎯 [{pos.name}] 트레일링 스탑 발동! 수익 보전을 위해 전량 매도합니다.")
+                            if self.kis:
+                                self.kis.sell_market_order(ticker, pos.shares)
+                            qty, profit = pos.sell(price)
+                            log_trade_journal(self.user_id, ticker, pos.name, 'SELL', price, strat_name, reason, profit=profit)
+                            if self.telegram:
+                                self.telegram.send_message(f"🎯 [{pos.name}] 트레일링 스탑 익절 완료! 손익: {profit:+,.0f}원")
+                            pos.max_price = 0  # 초기화
+                            continue
 
                 # 🔴 [필수 추가] 하드 손절선(Hard Stop-Loss) 로직 (-5% 하락 시 기계적 매도)
                 if pos.shares > 0 and pos.avg_price > 0:
@@ -653,7 +640,8 @@ class BotController:
                             stock_name=pos.name, 
                             ticker=ticker, 
                             price=price, 
-                            strategy=f"{strat_name} | 실시간 재무상태: {financial_data}", 
+                            # 🔄 [수정 변경]기존 strategy 대신 매크로 시황이 포함된 extended_strategy를 주입
+                            strategy=extended_strategy, 
                             indicator_val=ind_val, 
                             hot_sectors=self.hot_sectors,
                             recent_trades=recent_logs,
@@ -827,20 +815,29 @@ class BotController:
             # 📉 [신규 퀀트 로직] 시장 국면(상승/하락) 판별 및 하이브리드 포트폴리오 스위칭 (3방패 2창)
             is_bull_market = True
             try:
-                # 코스닥 지수(코드 '2001')의 20일 이동평균선 확인
-                end_dt_idx = now
-                start_dt_idx = end_dt_idx - timedelta(days=40)
-                index_df = krx_stock.get_index_ohlcv_by_date(start_dt_idx.strftime("%Y%m%d"), end_dt_idx.strftime("%Y%m%d"), "2001")
-                if not index_df.empty and len(index_df) >= 20:
-                    index_close = index_df['종가']
-                    index_ma20 = index_close.rolling(20).mean().iloc[-1]
-                    current_index = index_close.iloc[-1]
-                    
-                    # 현재 지수가 20일선 아래면 하락장으로 규정
-                    if current_index < index_ma20:
-                        is_bull_market = False
+                # 안정적인 KIS API의 get_ohlcv 함수를 우회 활용 (업종코드 코스닥: '2001')
+                if self.kis:
+                    index_df = self.kis.get_ohlcv("2001", "D")
+                    if not index_df.empty and len(index_df) >= 20:
+                        index_close = index_df['close']
+                        index_ma20 = index_close.rolling(20).mean().iloc[-1]
+                        current_index = index_close.iloc[-1]
+                        
+                        if current_index < index_ma20:
+                            is_bull_market = False
             except Exception as e:
                 self.add_log(f"⚠️ 시장 지수 판별 중 오류 발생(기본 상승장 간주): {e}")
+
+            # 🟢 [신규 추가 코드] 거시 시장 국면에 따른 동적 자산 배분(Dynamic Asset Allocation) 비율 조정
+            global CORE_RATIO, SATELLITE_RATIO
+            if not is_bull_market:
+                CORE_RATIO = 0.60       # 하락장에서는 코어(보수적 자산) 비중 증대
+                SATELLITE_RATIO = 0.40  # 위성 트레이딩 자금 축소 (현금 확보 및 헷지)
+                self.add_log(f"📊 [동적 자산배분] 약세장 방어 모드 가동: 코어 {CORE_RATIO*100}% / 위성 {SATELLITE_RATIO*100}% 변환")
+            else:
+                CORE_RATIO = 0.30       # 상승장 기본 비율 유지
+                SATELLITE_RATIO = 0.70
+                self.add_log(f"📊 [동적 자산배분] 강세장 공격 모드 가동: 코어 {CORE_RATIO*100}% / 위성 {SATELLITE_RATIO*100}% 변환")
 
             new_info = []
             if not is_bull_market:
@@ -958,6 +955,11 @@ class BotController:
                     self.telegram.send_message(f"🧠 [라씨 AI 자가 학습 완료]\n\n이번 주 오답노트를 바탕으로 새로운 매매 원칙을 세웠습니다:\n\n{new_rules}")
 
     # ─── 봇 시작/정지 ───
+    def _run_threaded(self, job_func):
+        """무거운 스케줄러 작업을 메인 매매 루프와 분리하여 백그라운드 스레드에서 실행합니다."""
+        job_thread = threading.Thread(target=job_func, daemon=True)
+        job_thread.start()
+
     def _run_loop(self, total_cash):
         import schedule
         self.scheduler = schedule.Scheduler()
@@ -968,12 +970,13 @@ class BotController:
         else:
             self.add_log("📊 기존 포트폴리오로 매매를 재개합니다.")
 
+        # 5분 매매 감시는 가볍고 즉각적이어야 하므로 그대로 실행하되, 나머지 무거운 작업들은 _run_threaded를 통해 비동기로 실행
         self.scheduler.every(5).minutes.do(self.trading_job)
-        self.scheduler.every().day.at("11:00").do(self.generate_daily_report)
-        self.scheduler.every().day.at("09:05").do(self._rescreen_satellites)
+        self.scheduler.every().day.at("11:00").do(lambda: self._run_threaded(self.generate_daily_report))
+        self.scheduler.every().day.at("09:05").do(lambda: self._run_threaded(self._rescreen_satellites))
         
-        # 🟢 [여기에 새로 추가] 매주 금요일 장 마감 후 성찰 스케줄 🟢
-        self.scheduler.every().friday.at("16:00").do(self._weekly_self_reflection)
+        # 매주 금요일 장 마감 후 성찰 스케줄 비동기 처리
+        self.scheduler.every().friday.at("16:00").do(lambda: self._run_threaded(self._weekly_self_reflection))
 
         self.trading_job()  # 즉시 1회 실행
         

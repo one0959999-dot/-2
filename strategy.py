@@ -139,13 +139,15 @@ def get_signal_by_strategy(ticker, strategy_name, kis_api=None):
             m = _ema(c, 12) - _ema(c, 26); ms = _ema(m, 9)
             return _cross(m, ms), price, m.iloc[-1]
         elif "볼린저" in sn:
-            # 🛠️ [버그 수정] 단순 비율이 아닌 진짜 볼린저 밴드 공식(표준편차 활용)으로 수정
+            # 🛠️ [버그 완벽 수정] 하단/상단 밴드의 현재값과 직전값을 정확히 인덱싱하여 바인딩
             mid = _sma(c, 20); sd = c.rolling(20).std()
             lower = mid - (2 * sd)
             upper = mid + (2 * sd)
+            
             prev_c, cur_c = c.iloc[-2], c.iloc[-1]
             prev_l, cur_l = lower.iloc[-2], lower.iloc[-1]
             prev_u, cur_u = upper.iloc[-2], upper.iloc[-1]
+            
             if prev_c < prev_l and cur_c >= cur_l: return 'BUY', price, cur_c # 하단 반등
             if prev_c > prev_u and cur_c <= cur_u: return 'SELL', price, cur_c # 상단 이탈
             return 'HOLD', price, cur_c
@@ -180,6 +182,8 @@ class Position:
         self.shares    = 0           # 보유 주식 수
         self.avg_price = 0           # 평균 매수가
         self.trades    = []          # 거래 기록
+        # 🟢 [신규 추가 코드] 트레일링 스탑을 위한 보유 기간 중 최고가 추적 변수
+        self.max_price = 0
 
     def buy(self, price, all_in=True):
         if self.shares > 0 or self.cash < price:

@@ -389,9 +389,9 @@ class KisApi:
             "tr_id": "FHKST03010100"
         }
         
-        # 오늘 날짜와 100일 전 날짜 계산
+        # 오늘 날짜와 180일 전 날짜 계산 (120일 이동평균선 확보용)
         end_dt = datetime.now()
-        start_dt = end_dt - timedelta(days=100)
+        start_dt = end_dt - timedelta(days=180)
         
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
@@ -428,5 +428,25 @@ class KisApi:
             print(f"[KIS] 기간별 시세 조회 오류: {e}")
             return pd.DataFrame()
 
+# 🟢 [신규 추가 코드] AI 판단용 실시간 거시경제 및 시장 지수 수집 기능
+    def get_macro_context(self):
+        """AI의 시황 인지를 위해 코스피, 코스닥 현재가 및 간단한 환율 동향을 문자열로 반환합니다."""
+        macro_info = []
+        try:
+            # 0001: 코스피 지수, 2001: 코스닥 지수
+            for code, name in [("0001", "KOSPI"), ("2001", "KOSDAQ")]:
+                price = self.get_current_price(code)
+                if price:
+                    macro_info.append(f"{name} 지수: {price:,}")
+            
+            # 환율 정보 우회 조회 시도 (환율 ETF 가격 추이 등으로 대체하거나 생략 가능)
+            usd_etf = self.get_current_price("261240") # KODEX 미국달러선물
+            if usd_etf:
+                macro_info.append(f"원/달러 환율 연동 지표(ETF): {usd_etf:,}원")
+        except Exception:
+            pass
+        return " | ".join(macro_info) if macro_info else "시장 지수 실시간 조회 불가"
+
 if __name__ == '__main__':
+    # 테스트 코드
     pass

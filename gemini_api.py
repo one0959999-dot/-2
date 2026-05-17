@@ -96,15 +96,19 @@ class GeminiApi:
   ...
 ]"""
         try:
-            res = self.generate_content(prompt)
-            # 마크다운 코드 블록 제거 후 정규식으로 JSON 배열만 안전하게 추출
-            import re
-            match = re.search(r'\[.*\]', res, re.DOTALL)
-            if match:
-                json_str = match.group(0)
-            else:
-                json_str = "[]"
-            selected_data = json.loads(json_str)
+            # 완벽한 JSON 출력을 위해 구조화된 스키마 정의
+            config = types.GenerateContentConfig(
+                system_instruction=self.SYSTEM_PROMPT,
+                temperature=0.3,
+                response_mime_type="application/json",
+                response_schema=list[dict[str, str]] # [{'ticker': '...', 'reason': '...'}] 구조 강제
+            )
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=prompt,
+                config=config
+            )
+            selected_data = json.loads(response.text)
             
             final_selection = []
             for item in selected_data:
