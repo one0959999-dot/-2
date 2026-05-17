@@ -227,8 +227,23 @@ class BotController:
         if len(self.logs) > 100:
             self.logs.pop(0)
 
+    def _send_telegram(self, message):
+        """텔레그램 발송을 백그라운드 비동기로 처리하고 실전/모의 모드를 명확히 표시합니다."""
+        if not self.telegram:
+            return
+        
+        mode_prefix = "🟢[모의]" if self._is_mock else "🔴[실전]"
+        final_msg = f"{mode_prefix} {message}"
+        
+        # 텔레그램 API 대기 시간(딜레이)으로 인한 메인 봇 병목 방지
+        threading.Thread(target=self.telegram.send_message, args=(final_msg,), daemon=True).start()
+
     def reload_api_keys(self, kis_config, telegram_config, gemini_config, core_stocks):
         """사용자가 웹에서 API 키를 수정했을 때, 실행 중인 봇 객체들에 실시간으로 새 키를 반영합니다."""
+        
+        # 🚨 [잔고 딜레이 & 꼬임 방지] 계좌 키가 바뀌었으니 캐시된 잔고를 즉시 파기합니다.
+        self.cached_balance = None
+        
         try:
             self.user_core_stocks = json.loads(core_stocks) if core_stocks else []
         except:
@@ -270,6 +285,9 @@ class BotController:
             # KIS API 객체의 모드와 URL 정보를 먼저 변경합니다.
             self.kis.set_mode(is_mock) 
             
+        # 🚨 [잔고 딜레이 & 꼬임 방지] 모드가 바뀌었으니, 이전 모드의 잔고가 화면에 보이지 않도록 즉시 파기합니다.
+        self.cached_balance = None
+            
         mode_name = "모의투자" if is_mock else "실전투자"
         self.add_log(f"🔄 모드 실시간 전환: {mode_name} 자산 장부 데이터로 전면 교체합니다.")
         
@@ -301,8 +319,8 @@ class BotController:
             line = f"  {i+1}. {c['name']} ({c['ticker']}) → [{c['strategy_name']}] {c['return_pct']:+.1f}%"
             log_lines.append(line)
             self.add_log(f"✅ {line.strip()}")
-        if self.telegram:
-            self.telegram.send_message("🔍 위성 종목 & 전략 선정!\n" + "\n".join(log_lines))
+            
+        self._send_telegram("🔍 위성 종목 & 전략 선정!\n" + "\n".join(log_lines))
 
         # 2. 자금 배분
         core_budget = total_cash * CORE_RATIO
@@ -532,8 +550,7 @@ class BotController:
                             self.kis.buy_market_order(core.ticker, qty)
                         msg = f"💎 {core.name} 매수 {qty}주 @ {cp:,}원 (RSI:{core_rsi:.1f}) → 총 {core.shares}주"
                         self.add_log(msg)
-                        if self.telegram:
-                            self.telegram.send_message(msg)
+                        self._send_telegram(msg)
 
                 elif core_signal == 'SELL' and core.shares > core.floor_shares:
                     if self.kis:
@@ -544,8 +561,7 @@ class BotController:
                         msg = f"💎 {core.name} 익절 매도 {qty}주 @ {cp:,}원 (RSI:{core_rsi:.1f}) | 이익 {profit:,.0f}원"
                         self.add_log(msg)
                         self.daily_pnl[now.strftime('%Y-%m-%d')] = self.daily_pnl.get(now.strftime('%Y-%m-%d'), 0) + profit
-                        if self.telegram:
-                            self.telegram.send_message(msg)
+                        self._send_telegram(msg)
                 else:
                     self.add_log(f"  [{core.name}] HOLD (RSI:{core_rsi:.1f}, floor:{core.floor_shares}주 보호)")
             except Exception as e:
@@ -610,8 +626,7 @@ class BotController:
                                 self.kis.sell_market_order(ticker, pos.shares)
                             qty, profit = pos.sell(price)
                             log_trade_journal(self.user_id, ticker, pos.name, 'SELL', price, strat_name, reason, profit=profit)
-                            if self.telegram:
-                                self.telegram.send_message(f"🎯 [{pos.name}] 트레일링 스탑 익절 완료! 손익: {profit:+,.0f}원")
+                            self._send_telegram(f"🎯 [{pos.name}] 트레일링 스탑 익절 완료! 손익: {profit:+,.0f}원")
                             pos.max_price = 0  # 초기화
                             continue
 
@@ -627,8 +642,7 @@ class BotController:
                         msg = f"💥 [{pos.name}] 기계적 손절 완료: {qty}주 @ {price:,}원 | 손익: {profit:+,.0f}원"
                         self.add_log(msg)
                         log_trade_journal(self.user_id, ticker, pos.name, 'SELL', price, strat_name, reason, profit=profit)
-                        if self.telegram:
-                            self.telegram.send_message(msg)
+                        self._send_telegram(msg)
                         today = datetime.now().strftime('%Y-%m-%d')
                         self.daily_pnl[today] = self.daily_pnl.get(today, 0) + profit
                         continue # 매도 후 아래의 일반 신호(BUY/SELL) 체크는 건너뜀
@@ -671,8 +685,7 @@ class BotController:
                         msg = f"📈 [{pos.name}] AI 매수 승인: {qty}주 @ {price:,}원 [{strat_name} → {ind_val:.1f}]"
                         self.add_log(msg)
                         log_trade_journal(self.user_id, ticker, pos.name, 'BUY', price, strat_name, reason)
-                        if self.telegram:
-                            self.telegram.send_message(msg)
+                        self._send_telegram(msg)
 
                 elif signal == 'SELL' and pos.shares > 0:
                     reason = "조건 충족 자동 매도"
@@ -705,8 +718,7 @@ class BotController:
                            f"| 손익: {profit:+,.0f}원 [{strat_name} → {ind_val:.1f}]")
                     self.add_log(msg)
                     log_trade_journal(self.user_id, ticker, pos.name, 'SELL', price, strat_name, reason, profit=profit)
-                    if self.telegram:
-                        self.telegram.send_message(msg)
+                    self._send_telegram(msg)
 
                     # 일별 수익 기록
                     today = datetime.now().strftime('%Y-%m-%d')
@@ -724,8 +736,7 @@ class BotController:
                                 
                             msg_dist = f"🔄 위성 수익 {profit:,.0f}원 중 {reinvest:,.0f}원을 코어({len(self.core_positions)}개) 매수자금으로 균등 편입"
                             self.add_log(msg_dist)
-                            if self.telegram:
-                                self.telegram.send_message(msg_dist)
+                            self._send_telegram(msg_dist)
                 else:
                     # 매수/매도 조건이 아닐 때 HOLD 로그 생략
                     pass
@@ -911,8 +922,7 @@ class BotController:
             self.satellite_info = keep_info + new_info
 
             msg = f"📅 데일리 위성 리밸런싱 완료! (유지: {len(keep_tickers)} / 교체: {n_needed})\n" + "\n".join(added_lines)
-            if self.telegram:
-                self.telegram.send_message(msg)
+            self._send_telegram(msg)
                 
             self.last_screen_date = now.date()
             self._save_state()
@@ -932,14 +942,13 @@ class BotController:
                 self._save_state()
                 
                 # [추가] 리포트가 정상 생성되면 설정된 텔레그램 채널로 요약본을 즉시 발송합니다.
-                if self.telegram:
-                    msg = "📝 [🎯 11시 장중 시장 분석 리포트 알림]\n\n"
-                    if isinstance(report_data, dict):
-                        # 리포트 딕셔너리 내부에서 요약(summary) 또는 본문(content)을 안전하게 추출합니다.
-                        msg += report_data.get('summary', report_data.get('content', '11시 시장 분석이 완료되었습니다. 자세한 정보는 대시보드 팝업창을 확인하세요!'))
-                    else:
-                        msg += str(report_data)
-                    self.telegram.send_message(msg)
+                msg = "📝 [🎯 11시 장중 시장 분석 리포트 알림]\n\n"
+                if isinstance(report_data, dict):
+                    # 리포트 딕셔너리 내부에서 요약(summary) 또는 본문(content)을 안전하게 추출합니다.
+                    msg += report_data.get('summary', report_data.get('content', '11시 시장 분석이 완료되었습니다. 자세한 정보는 대시보드 팝업창을 확인하세요!'))
+                else:
+                    msg += str(report_data)
+                self._send_telegram(msg)
         except Exception as e:
             self.add_log(f"⚠️ 일일 리포트 생성 중 오류: {e}")
 
@@ -977,8 +986,7 @@ class BotController:
             if new_rules:
                 save_ai_rules(self.user_id, new_rules)
                 self.add_log(f"✨ [AI 진화 완료] 새로운 투자 원칙이 두뇌에 각인되었습니다:\n{new_rules}")
-                if self.telegram:
-                    self.telegram.send_message(f"🧠 [라씨 AI 자가 학습 완료]\n\n이번 주 오답노트를 바탕으로 새로운 매매 원칙을 세웠습니다:\n\n{new_rules}")
+                self._send_telegram(f"🧠 [라씨 AI 자가 학습 완료]\n\n이번 주 오답노트를 바탕으로 새로운 매매 원칙을 세웠습니다:\n\n{new_rules}")
 
     # ─── 봇 시작/정지 ───
     def _run_threaded(self, job_func):
@@ -1056,8 +1064,7 @@ class BotController:
             # 🟢 [추가] 봇 시작 시 텔레그램으로 즉각 보고
             mode_str = "모의투자" if self._is_mock else "실전투자"
             self.add_log(f"▶️ [{mode_str}] 매매 봇이 시작되었습니다.")
-            if self.telegram:
-                self.telegram.send_message(f"▶️ [{mode_str}] 봇 감시를 시작합니다.\n- 현재 모드에 맞춰 종목 감시 및 자동 매매가 활성화되었습니다.")
+            self._send_telegram("▶️ 봇 감시를 시작합니다.\n- 현재 모드에 맞춰 종목 감시 및 자동 매매가 활성화되었습니다.")
                 
             return True
         return False
@@ -1071,8 +1078,7 @@ class BotController:
                 
             # 🟢 [추가] 봇 정지 시 텔레그램으로 즉각 보고
             self.add_log("⏸️ 매매 봇이 일시 정지되었습니다.")
-            if self.telegram:
-                self.telegram.send_message("⏸️ 봇 감시가 일시 정지되었습니다.\n- 대기 상태로 전환되어 매수/매도가 중단됩니다.")
+            self._send_telegram("⏸️ 봇 감시가 일시 정지되었습니다.\n- 대기 상태로 전환되어 매수/매도가 중단됩니다.")
 
     # ─── 대시보드 상태 반환 ───
     def get_pnl_data(self):

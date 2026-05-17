@@ -102,13 +102,19 @@ def kis_balance():
     if bot.cached_balance:
         return jsonify({"status": "success", "data": bot.cached_balance})
     
-    # 서버 최초 구동 직후 캐시가 준비 안 된 최초 1회만 동기 조회 수행
-    balance = bot.kis.get_account_balance()
-    if balance:
-        bot.cached_balance = balance
-        bot._sync_internal_balances(balance)
-        return jsonify({"status": "success", "data": balance})
-    return jsonify({"status": "error", "message": "잔고 조회 실패"})
+    # 🚨 [계좌 화면 딜레이 원인 완벽 제거] 
+    # 과거에는 여기서 증권사 서버로 동기식 조회를 하느라 웹 화면 전체가 수 초간 멈췄습니다.
+    # 이제 조회를 기다리지 않고 빈 틀(0원)만 즉시 던져주어 화면 멈춤(딜레이)을 0초로 만듭니다. 
+    # (진짜 데이터는 백그라운드 스레드가 1~2초 내에 알아서 채워 넣고 다음 번에 자연스럽게 표시됩니다)
+    return jsonify({
+        "status": "success", 
+        "data": {
+            "total_cash": 0, 
+            "total_value": 0, 
+            "total_purchase": 0, 
+            "stocks": []
+        }
+    })
 
 @app.route('/api/toggle', methods=['POST'])
 @login_required
