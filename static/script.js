@@ -486,25 +486,11 @@ window.toggleMode = async function () {
         });
         const result = await res.json();
         if (result.status === 'success') {
-            // UI를 즉시 갱신하기 위해 상태를 다시 가져옴
+            // 🛠️ [딜레이 해결 핵심] 상태를 다시 가져온 직후, 
+            // 3초 타이머를 기다리지 않고 전체 화면(버튼, 테이블, 테마)을 즉시 다시 그립니다.
             fetch('/api/status').then(r => r.json()).then(data => {
-                const isLive = (data.is_mock === false || data.is_mock === 0);
-                const realSection = document.getElementById('real-account-section');
-                const mockSection = document.getElementById('mock-notice-section');
-
-                if (realSection && mockSection) {
-                    realSection.style.display = 'block';
-                    mockSection.style.display = 'none';
-                }
-
-                if (isLive) {
-                    document.body.classList.remove('theme-warm-beige');
-                } else {
-                    document.body.classList.add('theme-warm-beige');
-                }
-
-                const pnlTitle = document.getElementById('pnl-title');
-                if (pnlTitle) pnlTitle.textContent = isLive ? '실전투자 수익률' : '모의투자 수익률';
+                updateUI(data);  // 봇 Running/Stopped 버튼 상태 및 테이블 즉시 갱신
+                fetchPnl();      // 차트 및 수익률 데이터 즉시 갱신
             });
         } else {
             console.error('모드 변경 실패');
