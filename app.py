@@ -49,6 +49,14 @@ def get_current_bot():
 def index():
     user_data = current_user.data
     gemini_enabled = bool(user_data.get('gemini_api_key'))
+    
+    # 💡 [프리워밍 개선] 사용자가 메인 화면에 진입하는 즉시 실전 봇과 모의 봇을 동시에 모두 선제적으로 가동합니다.
+    # 이로써 스위치를 토글하기 전이든 후든 두 환경 모두 백그라운드에서 24시간 완벽히 Working 상태를 유지하며 딜레이를 원천 차단합니다.
+    mock_data = {**dict(user_data), 'is_mock': 1}
+    real_data = {**dict(user_data), 'is_mock': 0}
+    manager.get_bot(current_user.id, mock_data)
+    manager.get_bot(current_user.id, real_data)
+    
     return render_template('index.html', user=current_user, gemini_enabled=gemini_enabled)
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -290,25 +298,8 @@ def set_mode():
     for k, v in dict(user_data).items():
         current_user.data[k] = v
     
-    # 3. 새롭게 전환된 봇 인스턴스를 가져오고 모드 전환 및 최신 API 키를 즉시 주입합니다.
-    bot = get_current_bot()
-    if bot:
-        bot.update_mode(bool(is_mock))
-        prefix = 'mock_' if is_mock else 'real_'
-        bot.reload_api_keys(
-            kis_config={
-                "app_key": current_user.data.get(f'{prefix}app_key'),
-                "app_secret": current_user.data.get(f'{prefix}app_secret'),
-                "account_no": current_user.data.get(f'{prefix}account_no'),
-                "is_mock": bool(is_mock)
-            },
-            telegram_config={
-                "token": current_user.data.get('telegram_token'),
-                "chat_id": current_user.data.get('telegram_chat_id')
-            },
-            gemini_config={"api_key": current_user.data.get('gemini_api_key')},
-            core_stocks=current_user.data.get('core_stocks')
-        )
+    # 3. (삭제됨) 봇의 상태를 리셋하거나 덮어쓰지 않고, UI 표시용 세션 데이터만 변경합니다.
+    # 이로써 실전 봇과 모의 봇은 각자의 방에서 독립적으로 계속 가동되며 딜레이가 발생하지 않습니다.
         
     return jsonify({"status": "success", "is_mock": is_mock})
 

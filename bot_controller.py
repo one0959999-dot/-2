@@ -278,29 +278,16 @@ class BotController:
         self.add_log("🔑 변경된 API 키 및 계좌 설정이 시스템에 실시간 반영되었습니다.")
 
     def update_mode(self, is_mock, total_cash=10000000):
-        """봇을 멈추지 않고 실전/모의 모드를 즉시 전환하며, 해당 모드의 독립 장부를 새로 로드합니다."""
-       
-        self._is_mock = is_mock
-        if self.kis:
-            # KIS API 객체의 모드와 URL 정보를 먼저 변경합니다.
-            self.kis.set_mode(is_mock) 
-            
-        # 🚨 [잔고 딜레이 & 꼬임 방지] 모드가 바뀌었으니, 이전 모드의 잔고가 화면에 보이지 않도록 즉시 파기합니다.
-        self.cached_balance = None
-            
-        mode_name = "모의투자" if is_mock else "실전투자"
-        self.add_log(f"🔄 모드 실시간 전환: {mode_name} 자산 장부 데이터로 전면 교체합니다.")
+        """
+        봇을 멈추지 않고 실전/모의 모드를 즉시 전환하며, 해당 모드의 독립 장부를 새로 로드합니다.
+        (더 이상 UI 모드 전환 시 호출되지 않으며, 시스템 안정성을 위해 파괴적인 리셋 기능을 무력화합니다.)
+        """
+        # 모드가 바뀌더라도 기존 봇의 정체성(실전 또는 모의)을 훼손하지 않도록
+        # KIS API 모드 변경 및 캐시 파기(self.cached_balance = None) 로직을 전면 제거합니다.
         
-        # [핵심 추가] 봇이 가동 중(Running) 상태라면 바뀐 모드의 장부 데이터를 DB에서 불러옵니다.
-        if self.is_running:
-            restored = self._restore_state()
-            if not restored:
-                self.add_log(f"ℹ️ {mode_name}의 기존 저장 상태가 없어 새로 포트폴리오를 구성합니다.")
-                self.initialize_portfolio(total_cash)
-        else:
-            # 봇이 정지(Stopped) 상태일 때도 대시보드 화면에 올바른 코어 종목 금액이 나오도록 동기화합니다.
-            self._init_dummy_cores()
-            self._restore_state()
+        mode_name = "모의투자" if is_mock else "실전투자"
+        self.add_log(f"ℹ️ UI 모드가 {mode_name} 화면으로 전환되었습니다. (현재 모니터링은 독립적으로 유지됩니다.)")
+        pass
 
     # ─── 초기화 ───
     def initialize_portfolio(self, total_cash):
