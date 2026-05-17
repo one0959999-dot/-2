@@ -170,6 +170,7 @@ def get_signal_by_strategy(ticker, strategy_name, kis_api=None, df=None):
     except Exception as e:
         return 'HOLD', price, 0
 
+
 class Position:
     """개별 종목 포지션 상태 관리"""
     def __init__(self, ticker, name, budget):
@@ -181,7 +182,6 @@ class Position:
         self.shares    = 0           # 보유 주식 수
         self.avg_price = 0           # 평균 매수가
         self.trades    = []          # 거래 기록
-        # 🟢 [신규 추가 코드] 트레일링 스탑을 위한 보유 기간 중 최고가 추적 변수
         self.max_price = 0
 
     def buy(self, price, all_in=True):
@@ -237,7 +237,6 @@ class CorePosition:
         self.shares    += qty
         self.avg_price  = total_cost / self.shares if self.shares > 0 else price
         self.cash      -= cost
-        # floor 설정: 처음 매수한 수량의 30%는 영구 보존
         if self.floor_shares == 0:
             self.floor_shares = max(1, int(self.shares * CORE_MIN_FLOOR_RATIO))
         self.buy_log.append({
