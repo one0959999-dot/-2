@@ -363,6 +363,27 @@ def set_keys():
     # 2. 브라우저에게 "성공했다"고 대답해줌
     return jsonify({"status": "success"})
 
+@app.route('/api/search/stock')
+@login_required
+def search_stock():
+    """웹 대시보드에서 코어 종목을 검색할 때 KIS API 또는 네이버를 통해 종목 코드를 찾아줍니다."""
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify({"results": []})
+        
+    bot = get_current_bot()
+    # 봇 객체나 KIS 연동 객체가 없으면 빈 리스트 반환
+    if not bot or not bot.kis:
+        return jsonify({"results": []})
+        
+    try:
+        # kis_api.py에 있는 search_stock_name 함수 호출
+        results = bot.kis.search_stock_name(q)
+        return jsonify({"results": results})
+    except Exception as e:
+        print(f"⚠️ 종목 검색 오류: {e}")
+        return jsonify({"results": []})
+
 if __name__ == '__main__':
     init_db()
     # debug=False 및 use_reloader=False로 설정하여 프로세스 이중 실행과 의도치 않은 자동 시작을 원천 차단합니다.

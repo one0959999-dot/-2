@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const realSection = document.getElementById('real-account-section');
         const mockSection = document.getElementById('mock-notice-section');
 
-        // 🟢 [버그 수정] 다른 기기에서 바꾼 스위치 버튼과 글씨 하이라이트 불빛 물리적 연동
+        // 🟢 다른 기기에서 바꾼 스위치 버튼과 글씨 하이라이트 불빛 물리적 연동
         const cb = document.getElementById('modeSwitch');
         const lblReal = document.getElementById('label-real');
         const lblMock = document.getElementById('label-mock');
@@ -274,35 +274,40 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        if (realSection && mockSection) {
-            if (isLive) {
-                realSection.style.display = 'block';
-                mockSection.style.display = 'none';
-                startKisBalancePolling(); // 실전: 자동 업데이트 시작
-            } else {
-                realSection.style.display = 'none';
-                mockSection.style.display = 'block';
-                stopKisBalancePolling(); // 모의: 중지
+        // 🎨 [기능 개방 및 디자인 변경] 모의투자도 실전처럼 실시간 계좌 잔고를 완벽히 출력 및 동기화합니다.
+        if (realSection) realSection.style.display = 'block'; // 잔고 테이블 섹션 상시 노출
+        if (mockSection) mockSection.style.display = 'none';  // 단순 안내 문구는 숨김 처리
 
-                // 💎 [버그 수정] 모의투자일 때 기존 실전 자산의 흔적을 말끔히 소거하고 독립 가상자산 총액 강제 수치 대치
-                const totalAsset = data.mock_total_asset || 0;
-                const totalValEl = document.getElementById('total-value');
-                if (totalValEl) {
-                    totalValEl.textContent = totalAsset.toLocaleString() + '원';
-                }
+        // 🔄 실전/모의 모드에 상관없이 실시간 폴링(10초 주기 계좌 동기화)을 상시 가동합니다.
+        startKisBalancePolling();
 
-                // 모의투자만의 실현 손익 및 수익률 카드 연동
-                const totalPnl = data.mock_pnl || 0;
-                const pnlRt = data.mock_pnl_rt || 0;
-                const pnlEl = document.getElementById('total-pnl');
-                if (pnlEl) {
-                    const sign = totalPnl >= 0 ? '+' : '';
-                    const color = totalPnl > 0 ? '#f85149' : (totalPnl < 0 ? '#58a6ff' : '#8b949e');
-                    pnlEl.style.color = color;
-                    pnlEl.style.fontWeight = '700';
-                    pnlEl.textContent = `수익: ${sign}${totalPnl.toLocaleString()}원 (${sign}${pnlRt.toFixed(2)}%)`;
-                }
-            }
+        // 🎨 [배경색 및 테마 스위칭] 모의투자는 따뜻한 베이지 테마, 실전투자는 기존 다크 테마로 강제 대치
+        if (isLive) {
+            // 실전투자: 기존 오리지널 다크 테마 스타일 복원
+            document.body.style.backgroundColor = "#0d1117";
+            document.body.style.color = "#c9d1d9";
+
+            document.querySelectorAll('.glass-card, .info-card').forEach(card => {
+                card.style.background = "rgba(22, 27, 34, 0.8)";
+                card.style.borderColor = "rgba(48, 54, 61, 0.8)";
+                card.style.color = "#e6edf3";
+            });
+            document.querySelectorAll('th').forEach(th => th.style.color = "#8b949e");
+            document.querySelectorAll('td').forEach(td => td.style.color = "#e6edf3");
+        } else {
+            // 모의투자: 따뜻하고 부드러운 베이지/아이보리 감성 테마 적용 (오인 매매 절대 방지)
+            document.body.style.backgroundColor = "#f4efe6"; // 부드러운 베이지 배경색
+            document.body.style.color = "#2c3e50";          // 시인성 높은 다크 그레이 글자색
+
+            document.querySelectorAll('.glass-card, .info-card').forEach(card => {
+                card.style.background = "rgba(255, 255, 255, 0.95)";
+                card.style.borderColor = "#e4dcd0";
+                card.style.color = "#2c3e50";
+                card.style.boxShadow = "0 4px 20px rgba(165, 150, 130, 0.15)";
+            });
+            // 테이블 내부 헤더 및 텍스트 색상 최적화
+            document.querySelectorAll('th').forEach(th => th.style.color = "#7f8c8d");
+            document.querySelectorAll('td').forEach(td => td.style.color = "#2c3e50");
         }
 
         // Mode Label Update
@@ -351,12 +356,12 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('sat-num-display').textContent = data.num_satellites;
         }
 
-        // 💡 [여기 새로 추가] 봇 상태를 받아올 때 현재 DB에 보관 중인 코어 종목 명단을 실시간으로 전역 변수에 복사해 둡니다.
+        // 💡 봇 상태를 받아올 때 현재 DB에 보관 중인 코어 종목 명단을 실시간으로 전역 변수에 복사해 둡니다.
         if (data.cores) {
             window.cachedCoreStocks = data.cores.map(c => ({ ticker: c.ticker, name: c.name }));
         }
 
-        // 🟢 [최적화 1] 코어 카드가 그려질 때 중간 탈착 과정이 화면에 노출되지 않도록 가상 임시 저장소(Fragment)를 씁니다.
+        // 코어 카드가 그려질 때 중간 탈착 과정이 화면에 노출되지 않도록 가상 임시 저장소(Fragment)를 씁니다.
         const topCardsContainer = document.getElementById('top-cards-container');
         const satCard = topCardsContainer.lastElementChild;
         document.querySelectorAll('.core-card').forEach(e => e.remove());
@@ -388,7 +393,6 @@ document.addEventListener('DOMContentLoaded', () => {
         topCardsContainer.insertBefore(fragment, satCard); // 단 한번만 물리 결합하여 카드 출렁임 완벽 방어
 
         // ── Satellite Table ──
-        // 🟢 [최적화 2] 위성 테이블 역시 루프 안에서 내부 연산 버퍼 문자열로 먼저 다 이어붙입니다.
         if (sats.length > 0) {
             let satHtmlBuffer = '';
             sats.forEach(s => {
@@ -417,7 +421,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // ── Mini Log (Header) ──
-        // 🟢 [최적화 3] 상단 한 줄 로그 히스토리도 문자열 취합 후 한방에 밀어넣습니다.
         if (data.logs && data.logs.length > 0) {
             const recent = data.logs.slice(-6);
             let logHtmlBuffer = '';
