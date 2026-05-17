@@ -1053,10 +1053,27 @@ class BotController:
     def generate_daily_report(self):
         try:
             self.add_log("📝 11시 시장 분석 리포트 생성을 시작합니다...")
-            report_data = generate_daily_market_report(gemini_client=self.gemini, verbose=False)
+            
+            # 🚨 [신규 추가] 현재 관리 중인 코어 및 위성 전 종목의 실시간 뉴스 헤드라인 병렬 스캔 추출
+            news_lines = []
+            with self.lock:
+                target_stocks = [(c.name, c.ticker) for c in self.core_positions] + [(pos.name, t) for t, pos in self.satellite_positions.items()]
+            
+            # 중복 종목 제거
+            target_stocks = list(dict.fromkeys(target_stocks))
+            
+            for name, ticker in target_stocks:
+                news_headline = fetch_recent_news(name)
+                news_lines.append(f"- {name}({ticker}): {news_headline}")
+                time.sleep(0.1) # 네이버 디도스 차단 방어선 우회 미세 버퍼
+            
+            news_context = "\n".join(news_lines) if news_lines else "스캔된 주요 포트폴리오 뉴스 없음"
+            
+            # 취합된 뉴스 컨텍스트를 장중 보고서 양식으로 주입
+            report_data = generate_daily_market_report(gemini_client=self.gemini, verbose=False, news_context=news_context)
             if report_data:
                 self.daily_report = report_data
-                self.add_log("✅ 일일 시장 분석 리포트 생성 완료")
+                self.add_log("✅ 일일 시장 분석 및 실시간 NLP 뉴스 통합 리포트 생성 완료")
                 self._save_state()
                 msg = "📝 [🎯 11시 장중 시장 분석 리포트 알림]\n\n"
                 if isinstance(report_data, dict):
@@ -1281,9 +1298,9 @@ class BotController:
         try:
             if self.kis:
                 # 1. 기존 가동 중인 웹소켓 클라이언트 채널 안전하게 파괴
-                if self.ws_client and self.ws_client.ws:
+                if self.ws_client:
                     try:
-                        self.ws_client.ws.close()
+                        self.ws_client.stop()  # 🚨 [버그 수정] ws.close() 대신 stop()을 호출하여 좀비 스레드 무한 증식을 완벽 차단
                     except Exception:
                         pass
                 

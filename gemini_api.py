@@ -179,7 +179,14 @@ class GeminiApi:
 
     def analyze_market(self, market_data_text):
         """시장 데이터 분석 리포트 생성"""
-        prompt = f"제공된 시장 데이터를 바탕으로 전문적인 '데일리 시장 분석 리포트'를 작성해주세요.\n\n[데이터]\n{market_data_text}"
+        prompt = f"""[📊 장중 금융 시장 및 실시간 뉴스 복합 분석 리포트 생성 지침]
+제공된 시장 데이터(지수, 이평선, RSI 수급, 거래량) 및 주요 종목들의 [실시간 뉴스 헤드라인] 장부를 입체적으로 크로스 체크하여 월스트리트 기관 투자자 관점의 전문적인 '데일리 시장 분석 리포트'를 마크다운 양식으로 작성해 주세요.
+
+[🚨 뉴스 분석 시 주의 매뉴얼]
+뉴스 헤드라인에 담긴 단순 노이즈(찌라시, 광고성 정보)에 뇌동매매 흔들리지 마십시오. 기업의 펀더멘털을 저해하는 진짜 악재(유상증자, 분식회계, 횡령, 소송 등)인지, 추세를 강화하는 진짜 호재(대규모 수주, 어닝 서프라이즈, M&A)인지만을 냉철하게 선별하여 리포트의 시황 코멘트 요약에 날카롭고 뼈 때리는 논조로 기록하십시오.
+
+[데이터 및 뉴스 장부 정보]
+{market_data_text}"""
         return self.generate_content(prompt)
 
     def ai_approve_trade(self, signal, stock_name, ticker, price, strategy, indicator_val, hot_sectors, recent_trades=None, custom_rules=""):

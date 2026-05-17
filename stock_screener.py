@@ -616,7 +616,7 @@ def select_ai_core_stock(verbose=False):
 # ──────────────────────────────────────────────
 # 7. 일일 시장 분석 리포트 자동 생성
 # ──────────────────────────────────────────────
-def generate_daily_market_report(gemini_client=None, verbose=False):
+def generate_daily_market_report(gemini_client=None, verbose=False, news_context=None):
     """
     코스피/코스닥 대리 지수(ETF) 및 주도 섹터 데이터를 활용하여 텍스트 리포트를 생성합니다.
     gemini_client가 제공되면 AI 기반 분석을 수행합니다.
@@ -664,6 +664,11 @@ def generate_daily_market_report(gemini_client=None, verbose=False):
         raw_data_lines.append(f"\n[수급 특이사항]\n- 거래량 2배 급증 종목 수: {len(volume_surges)}개")
     except: pass
 
+    # 🚨 [신규 추가] 주요 종목의 실시간 네이버 뉴스 텍스트 컨텍스트 결합
+    if news_context:
+        raw_data_lines.append("\n[포트폴리오 주도주 실시간 주요 뉴스 헤드라인]")
+        raw_data_lines.append(news_context)
+
     market_data_text = "\n".join(raw_data_lines)
 
     # Gemini AI 활용 여부 결정
@@ -674,7 +679,6 @@ def generate_daily_market_report(gemini_client=None, verbose=False):
         # Fallback: 기존 룰 기반 리포트
         report_lines = [f"### 📊 Lassi Bot 시장 분석 리포트 ({today_str})"]
         report_lines.append("\n#### 📈 주요 지수 동향")
-        # (기존 로직 생략 - market_data_text를 마크다운으로 간단히 변환)
         report_lines.append(market_data_text.replace("[", "#### ").replace("-", "*"))
         report_lines.append("\n> AI 분석 기능이 비활성화되어 있습니다. Gemini API 키를 등록하면 더 정교한 분석을 받을 수 있습니다.")
         report_text = "\n".join(report_lines)
