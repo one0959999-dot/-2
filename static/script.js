@@ -163,10 +163,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         totalValEl.textContent = totalAsset.toLocaleString() + '원';
                     }
 
-                    // 평가손익 = 총 평가금액 - 매입금액 합계
-                    const totalPurchase = d.total_purchase || 0;
-                    const totalPnl = (d.total_value || 0) - totalPurchase;
-                    const pnlRt = totalPurchase > 0 ? (totalPnl / totalPurchase * 100) : 0;
+                    // 🚨 [자동화 정산 완료] 총 자산에서 자동 추적된 원가(DB 초기 설정값)를 빼서 누적 종합 수익금 및 수익률(%) 계산
+                    const totalPnl = totalAsset - USER_INVESTED_CAPITAL;
+                    const pnlRt = USER_INVESTED_CAPITAL > 0 ? (totalPnl / USER_INVESTED_CAPITAL * 100) : 0;
 
                     const pnlEl = document.getElementById('total-pnl');
                     if (pnlEl) {
@@ -285,8 +284,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     totalValEl.textContent = totalAsset.toLocaleString() + '원';
                 }
 
-                const totalPnl = data.mock_pnl || 0;
-                const pnlRt = data.mock_pnl_rt || 0;
+                // 모의투자도 진정한 총 수익률 계산법으로 교체
+                const totalPnl = totalAsset - USER_INVESTED_CAPITAL;
+                const pnlRt = USER_INVESTED_CAPITAL > 0 ? (totalPnl / USER_INVESTED_CAPITAL * 100) : 0;
+
                 const pnlEl = document.getElementById('total-pnl');
                 if (pnlEl) {
                     const sign = totalPnl >= 0 ? '+' : '';
@@ -749,7 +750,8 @@ window.saveCoreStocks = async function () {
         telegram_chat_id: document.getElementById('teleChatId').value,
         gemini_api_key: document.getElementById('geminiApiKey').value,
         core_stocks: coreJsonStr,
-        is_mock: isMock
+        is_mock: isMock,
+        initial_cash: document.getElementById('initialCash').value // 누적 원금 저장 데이터 전송
     };
     try {
         const res = await fetch('/api/settings/keys', {

@@ -358,7 +358,8 @@ def set_keys():
         'telegram_chat_id': data.get('telegram_chat_id'),
         'gemini_api_key': data.get('gemini_api_key'),
         'core_stocks': data.get('core_stocks'),
-        'is_mock': int(data.get('is_mock', 1)) # 명확한 정수형 보장
+        'is_mock': int(data.get('is_mock', 1)), # 명확한 정수형 보장
+        'initial_cash': float(data.get('initial_cash', 10000000)) # 누적 투자 원금 추가
     }
 
     # 1. 데이터 저장

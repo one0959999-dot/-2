@@ -118,6 +118,10 @@ class BotController:
         
         # 🔒 [스레드 안전성] 딕셔너리 동시 접근으로 인한 런타임 에러 방지용 락
         self.lock = threading.Lock()
+        
+        # 🚨 [신규 추가] 월급 및 외부 입금 자동 추적용 독립 장부 변수
+        self.last_asset_cost = None
+        self.pnl_this_turn = 0.0
             
         # 봇 정지 상태에서도 코어 종목 UI를 표시하기 위해 미리 로드
         self._init_dummy_cores()
@@ -183,7 +187,27 @@ class BotController:
                 if not real_balance or 'stocks' not in real_balance: return
                 real_cash = float(real_balance.get('total_cash', 0))
                 real_stock_value = float(real_balance.get('total_value', 0))
+                real_purchase = float(real_balance.get('total_purchase', 0))
                 total_equity = real_cash + real_stock_value
+                
+                # 🚨 [신규 추가] 외부 입금(월급 등) 자동 추적 및 원금 실시간 보정 알고리즘
+                current_asset_cost = real_cash + real_purchase # 주가 변동성이 제거된 순수 자산 원가
+                if self.last_asset_cost is not None:
+                    # 10초 동안 발생한 매매 실현손익을 반영한 기대 원가 계산
+                    expected_asset_cost = self.last_asset_cost + self.pnl_this_turn
+                    self.pnl_this_turn = 0.0 # 정산 완료 후 대기 비움
+                    
+                    # 기대 원가보다 현재 자산 원가가 늘어났다면 그것은 100% 외부 이체(입금)분임
+                    deposit_delta = current_asset_cost - expected_asset_cost
+                    if deposit_delta > 1000: # 1,000원 이상의 유의미한 입금액만 필터링
+                        from database import get_db_connection
+                        conn = get_db_connection()
+                        conn.execute('UPDATE users SET initial_cash = initial_cash + ? WHERE id = ?', (deposit_delta, self.user_id))
+                        conn.commit()
+                        conn.close()
+                        self.add_log(f"💰 [자율 원금 감지] 외부 입금(월급 등) 포착: +{deposit_delta:,.0f}원 -> 투자 원금 자동 상향 조정 완료.")
+                
+                self.last_asset_cost = current_asset_cost
                 
                 if total_equity >= 0:
                     target_core_pool = total_equity * self.core_ratio
@@ -648,6 +672,8 @@ class BotController:
                                     self._send_telegram(msg)
                                     
                                     with self.lock:
+                                        # 🚨 [신규 추가] 실현손익을 기록하여 자동 입금 감지 노이즈를 제거합니다.
+                                        self.pnl_this_turn += profit
                                         today_str = now.strftime('%Y-%m-%d')
                                         self.daily_pnl[today_str] = self.daily_pnl.get(today_str, 0) + profit
                     else:
@@ -741,6 +767,8 @@ class BotController:
                                     self._send_telegram(f"🎯 [{pos_name}] ATR 익절 전송 완료 (10분 쿨타임 가동)! 예상 손익: {profit:+,.0f}원")
                                     
                                     with self.lock:
+                                        # 🚨 [신규 추가] 실현손익 기록 연동
+                                        self.pnl_this_turn += profit
                                         today = datetime.now().strftime('%Y-%m-%d')
                                         self.daily_pnl[today] = self.daily_pnl.get(today, 0) + profit
                             continue
@@ -806,6 +834,8 @@ class BotController:
                             self._send_telegram(msg)
 
                             with self.lock:
+                                # 🚨 [신규 추가] 실현손익 기록 연동
+                                self.pnl_this_turn += profit
                                 today = datetime.now().strftime('%Y-%m-%d')
                                 self.daily_pnl[today] = self.daily_pnl.get(today, 0) + profit
                             
@@ -820,6 +850,14 @@ class BotController:
                                         msg_dist = f"🔄 위성 수익 중 {reinvest:,.0f}원 코어 매수자금 편입 완료"
                                         self.add_log(msg_dist)
                                         self._send_telegram(msg_dist)
+                                        
+                                        # 🚨 [버그 수정] 잔고 동기화 루프에 의해 현금이 덮어씌워지지 않도록 목표 비율 자체를 영구 상향 조절
+                                        total_asset_now = float(self.cached_balance.get('total_cash', 0)) + float(self.cached_balance.get('total_value', 0)) if self.cached_balance else 0
+                                        if total_asset_now > 0:
+                                            new_core_target = (total_asset_now * self.core_ratio) + reinvest
+                                            self.core_ratio = new_core_target / total_asset_now
+                                            self.satellite_ratio = 1.0 - self.core_ratio
+                                            self.add_log(f"📊 [복리 엔진 가동] 코어 포트폴리오 목표 비중이 {self.core_ratio*100:.2f}% 로 상향되었습니다.")
 
             except Exception as e:
                 self.add_log(f"⚠️ [{ticker}] 오류: {e}")
@@ -880,6 +918,13 @@ class BotController:
                                     split = reinvest / len(self.core_positions)
                                     for core in self.core_positions: core.cash += split
                                     self.add_log(f"🔄 위성 수익 {profit:,.0f}원 중 {reinvest:,.0f}원 코어 편입")
+                                    
+                                    # 🚨 [버그 수정] 스크리닝 교체 시에도 코어 비율 상향 업데이트 적용
+                                    total_asset_now = float(self.cached_balance.get('total_cash', 0)) + float(self.cached_balance.get('total_value', 0)) if self.cached_balance else 0
+                                    if total_asset_now > 0:
+                                        new_core_target = (total_asset_now * self.core_ratio) + reinvest
+                                        self.core_ratio = new_core_target / total_asset_now
+                                        self.satellite_ratio = 1.0 - self.core_ratio
                         freed_cash += pos.cash
                         with self.lock:
                             if ticker in self.satellite_positions: del self.satellite_positions[ticker]

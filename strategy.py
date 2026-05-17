@@ -81,6 +81,10 @@ def get_signal_by_strategy(ticker, strategy_name, kis_api=None, df=None):
     if df is None or df.empty:
         df = kis_api.get_ohlcv(ticker, "D")
     
+    # 외부 데이터 연동 시 대소문자 불일치(KeyError) 방지 방어 코드 추가
+    if df is not None and not df.empty:
+        df.columns = [str(c).lower() for c in df.columns]
+    
     if df.empty or 'close' not in df.columns:
         return 'HOLD', 0, 0
         
@@ -168,6 +172,7 @@ def get_signal_by_strategy(ticker, strategy_name, kis_api=None, df=None):
         else:
             return get_rsi_signal(ticker, df=df)
     except Exception as e:
+        print(f"[{ticker}] {strategy_name} 전략 에러: {e}")
         return 'HOLD', price, 0
 
 
@@ -194,8 +199,8 @@ class Position:
         if self.shares > 0 or self.cash < price:
             return 0
             
-        # 수수료 비용을 미리 산정하여 초과 매수로 인한 예수금 펑크(마이너스) 버그 현상을 방지합니다.
-        qty = int(self.cash // (price * (1 + self.fee_rate)))
+        # 수수료 비용 및 시장가(최유리지정가) 매수 시 증거금 버퍼(1%)를 반영하여 예수금 펑크를 방지합니다.
+        qty = int((self.cash * 0.99) // (price * (1 + self.fee_rate)))
         if qty == 0:
             return 0
             
@@ -263,7 +268,8 @@ class CorePosition:
         budget = cash_to_use if cash_to_use else self.cash
         available_budget = min(budget, self.cash)
         
-        qty = int(available_budget // (price * (1 + self.fee_rate)))
+        # 수수료 비용 및 시장가(최유리지정가) 매수 시 증거금 버퍼(1%)를 반영하여 예수금 펑크를 방지합니다.
+        qty = int((available_budget * 0.99) // (price * (1 + self.fee_rate)))
         if qty == 0:
             return 0
             

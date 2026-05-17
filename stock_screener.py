@@ -40,19 +40,23 @@ def _last_biz_day(days_back=0):
 import time
 from datetime import datetime, timedelta
 
+import threading
+
 # ──────────────────────────────────────────────
 # 날짜 기반 캐시 (매일 자정에 자동 갱신)
 # lru_cache 대신 TTL 방식으로 교체하여 항상 최신 주가 데이터 사용
 # ──────────────────────────────────────────────
 _ohlcv_cache = {}  # {(ticker, days): (date_str, DataFrame)}
+_cache_lock = threading.Lock() # 🚨 [버그 수정] 멀티유저/멀티스레드 충돌 방지용 락
 
 def fetch_ohlcv(ticker, days=200, kis=None):
     today_str = datetime.today().strftime('%Y%m%d')
     key = (ticker, days)
 
-    # 오늘 날짜의 캐시가 있으면 그대로 반환
-    if key in _ohlcv_cache and _ohlcv_cache[key][0] == today_str:
-        return _ohlcv_cache[key][1]
+    # 오늘 날짜의 캐시가 있으면 그대로 반환 (Thread-Safe)
+    with _cache_lock:
+        if key in _ohlcv_cache and _ohlcv_cache[key][0] == today_str:
+            return _ohlcv_cache[key][1]
 
     try:
         # 🟢 [pykrx 최적화] KIS API 인스턴스가 주어지면 pykrx를 회피하고 KIS API로 즉시 조회하여 IP 차단을 방어합니다.
@@ -60,7 +64,8 @@ def fetch_ohlcv(ticker, days=200, kis=None):
             df = kis.get_ohlcv(ticker, "D")
             if df is not None and not df.empty:
                 result = df.dropna(subset=['close']).tail(days)
-                _ohlcv_cache[key] = (today_str, result)
+                with _cache_lock:
+                    _ohlcv_cache[key] = (today_str, result)
                 return result
 
         # KIS API가 없거나 통신 실패한 경우에만 백업으로 pykrx 사용
@@ -75,7 +80,9 @@ def fetch_ohlcv(ticker, days=200, kis=None):
             '종가':'close','거래량':'volume'
         }, inplace=True)
         result = df.dropna(subset=['close']).tail(days)
-        _ohlcv_cache[key] = (today_str, result)  # 오늘 날짜와 함께 캐시
+        
+        with _cache_lock:
+            _ohlcv_cache[key] = (today_str, result)  # 오늘 날짜와 함께 캐시
         return result
     except Exception:
         return pd.DataFrame()
