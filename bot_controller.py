@@ -190,15 +190,16 @@ class BotController:
                 real_purchase = float(real_balance.get('total_purchase', 0))
                 total_equity = real_cash + real_stock_value
                 
-                # 🚨 [원금 자율 역추적 엔진 활성화] 9시 정각 구동 시 성공적으로 넘어온 계좌 총 자산을 원가 기준점으로 즉시 강제 갱신
+                # 🚨 [원금 자율 역추적 엔진 개조] 10000000원 기본값 검사를 완전 폐기합니다.
+                # 이제 봇을 켜는 순간(오늘 장 시작 시점) 계좌에 들어있는 총 평가자산을 오늘 하루의 "원금 기준점"으로 무조건 강제 고정합니다.
                 if not getattr(self, 'initial_capital_captured', False) and total_equity > 0:
                     from database import get_db_connection
                     conn = get_db_connection()
                     conn.execute('UPDATE users SET initial_cash = ? WHERE id = ?', (total_equity, self.user_id))
                     conn.commit()
                     conn.close()
-                    self.initial_capital_captured = True
-                    self.add_log(f"💰 [원금 자율 역추적 성공] 현재 계좌 잔고인 {total_equity:,.0f}원을 투자 원금(기준점)으로 자동 연동 완료했습니다.")
+                    self.initial_capital_captured = True  # 오늘 장 가동 중 중복 스냅샷 방지 플래그 선언
+                    self.add_log(f"💰 [원금 자율 역추적 성공] 구동 시점의 실시간 계좌 총자산 {total_equity:,.0f}원을 시스템 원금 기준선으로 자동 동기화했습니다.")
                 
                 # 🚨 [신규 추가] 외부 입금(월급 등) 자동 추적 및 원금 실시간 보정 알고리즘
                 current_asset_cost = real_cash + real_purchase # 주가 변동성이 제거된 순수 자산 원가
