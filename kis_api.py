@@ -499,13 +499,12 @@ class KisApi:
         """AI의 시황 인지를 위해 코스피, 코스닥 현재가 및 간단한 환율 동향을 문자열로 반환합니다."""
         macro_info = []
         try:
-            # 0001: 코스피 지수, 2001: 코스닥 지수
-            for code, name in [("0001", "KOSPI"), ("2001", "KOSDAQ")]:
+            # 🟢 [에러 패치] 순수 지수 코드 호출을 ETF 대리 지표로 변경하여 주식 TR(J) 에러 원천 차단
+            for code, name in [("069500", "KOSPI(KODEX 200)"), ("229200", "KOSDAQ(KODEX 코스닥150)")]:
                 price = self.get_current_price(code)
                 if price:
-                    macro_info.append(f"{name} 지수: {price:,}")
+                    macro_info.append(f"{name} 대리 지표: {price:,}원")
             
-            # 환율 정보 우회 조회 시도 (환율 ETF 가격 추이 등으로 대체하거나 생략 가능)
             # 환율 정보 우회 조회 시도 (환율 ETF 가격 추이 등으로 대체하거나 생략 가능)
             usd_etf = self.get_current_price("261240") # KODEX 미국달러선물
             if usd_etf:

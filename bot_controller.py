@@ -202,8 +202,12 @@ class BotController:
                         if int(sat.shares) > 0: sat.cash = 0.0
                         else: sat.cash = round(total_sat_cash / max(1, empty_sat_count), 2)
 
-                for core in self.core_positions: core.shares = 0
-                for sat in self.satellite_positions.values(): sat.shares = 0
+                for core in self.core_positions: 
+                    core.shares = 0
+                    core.order_pending = False # 🟢 잔고가 최신화되면 오더 락 해제
+                for sat in self.satellite_positions.values(): 
+                    sat.shares = 0
+                    sat.order_pending = False  # 🟢 잔고가 최신화되면 오더 락 해제
 
                 for real_stock in real_balance['stocks']:
                     t = real_stock['ticker']
@@ -733,7 +737,7 @@ class BotController:
                         continue
 
                 # ⚡ [Fast Track] 알고리즘 즉각 매수 파트
-                if signal == 'BUY' and pos_shares == 0:
+                if signal == 'BUY' and pos_shares == 0 and not getattr(pos, 'order_pending', False):
                     if not is_golden_hours: continue 
                     reason = "기술적 지표 조건 충족 (Fast Track 자동 매수)"
                     qty = int(pos_cash // price)
@@ -742,27 +746,25 @@ class BotController:
                         if self.kis: 
                             order_res = self.kis.buy_market_order(ticker, qty)
                             if order_res:
-                                # 💡 맹목적 기록(pos.buy) 대신, 증권사 실제 체결 잔고를 2초 뒤 당겨와서 완벽 동기화
-                                time.sleep(2.0)
-                                real_balance = self.kis.get_account_balance()
-                                if real_balance: self._sync_internal_balances(real_balance)
+                                # 🟢 스레드 블로킹 유발 지연(sleep) 제거 및 중복 매수 락 체결
+                                with self.lock:
+                                    pos.order_pending = True 
                                 
-                                msg = f"📈 [{pos_name}] 알고리즘 즉각 매수 전송 완료 (체결 내역 잔고 동기화 대기 중)"
+                                msg = f"📈 [{pos_name}] 알고리즘 즉각 매수 전송 완료 (비동기 잔고 동기화 대기 중)"
                                 self.add_log(msg)
                                 log_trade_journal(self.user_id, ticker, pos_name, 'BUY', price, strat_name, reason)
                                 self._send_telegram(msg)
 
                 # ⚡ [Fast Track] 알고리즘 즉각 매도 파트 
-                elif signal == 'SELL' and pos_shares > 0:
+                elif signal == 'SELL' and pos_shares > 0 and not getattr(pos, 'order_pending', False):
                     reason = "기술적 지표 조건 충족 (Fast Track 자동 매도)"
                     
                     if self.kis: 
                         order_res = self.kis.sell_market_order(ticker, pos_shares)
                         if order_res:
-                            # 💡 슬리피지가 반영된 정확한 이익(Profit)을 계산하기 위해 실제 매도 체결 후 계좌 상태 반영
-                            time.sleep(2.0)
-                            real_balance = self.kis.get_account_balance()
-                            if real_balance: self._sync_internal_balances(real_balance)
+                            # 🟢 스레드 블로킹 유발 지연(sleep) 제거 및 중복 매도 락 체결
+                            with self.lock:
+                                pos.order_pending = True 
                             
                             # (대략적인 손익 기록용)
                             profit = (price - pos_avg_price) * pos_shares 
@@ -1181,6 +1183,70 @@ class BotController:
             "cores": cores_data, "satellites": satellites, "mock_total_asset": mock_total_asset,
             "mock_pnl": mock_pnl, "mock_pnl_rt": mock_pnl_rt
         }
+
+    def refresh_websocket(self):
+        """매일 새벽 호출되어 24시간 만료되는 웹소켓 암호키(Approval Key)를 자동으로 재발급하고 연결을 연장합니다."""
+        self.add_log("🔄 [웹소켓 키 연장] KIS 규정에 따른 24시간 만료 대비 실시간 웹소켓 재시작 루틴 가동...")
+        try:
+            if self.kis:
+                # 1. 기존 가동 중인 웹소켓 클라이언트 채널 안전하게 파괴
+                if self.ws_client and self.ws_client.ws:
+                    try:
+                        self.ws_client.ws.close()
+                    except Exception:
+                        pass
+                
+                # 2. 증권사로부터 새로운 24시간짜리 무적 접속 권한키 발급
+                app_key = self.kis.get_approval_key()
+                if app_key:
+                    def on_price_update(ticker, price):
+                        self.live_prices[ticker] = price
+                    
+                    # 기존에 실시간 감시하고 있던 종목 임시 백업
+                    old_subscribed = list(self.ws_client.subscribed_tickers) if self.ws_client else []
+                    
+                    from kis_websocket import KisWebSocket
+                    self.ws_client = KisWebSocket(app_key, is_mock=self._is_mock, price_callback=on_price_update)
+                    self.ws_client.start()
+                    
+                    # 네트워크 안정화 딜레이 부여 후 백업된 종목 실시간 채널 재구독 등록
+                    time.sleep(3.0)
+                    for t in old_subscribed:
+                        self.ws_client.subscribe(t)
+                        
+                    self.add_log("✅ [웹소켓 키 연장 완료] 새로운 암호키 갱신 및 기존 실시간 감시 채널 복구 전원 성공!")
+                    self._send_telegram("📡 실시간 웹소켓 전용 접속 키(Approval Key) 24시간 만료 전 자동 연장 및 재구독 성공!")
+                else:
+                    self.add_log("❌ [웹소켓 키 연장 실패] 증권사 공용 방화벽 인증 실패 (키 발급 거절).")
+        except Exception as e:
+            self.add_log(f"❌ [웹소켓 키 연장 오류] 자동 재연결 제어 장치 장애: {e}")
+
+    def run_lstm_training(self):
+        """매주 토요일 새벽 2시, 메인 프로세스 간섭 없이 독립된 서브 백그라운드로 딥러닝 모델 훈련 실행"""
+        self.add_log("🧠 [AI 자율 진화] 주말 자동화 스케줄러에 의해 시장 상위 200대 주도주 패턴 LSTM 재학습을 가동합니다.")
+        self._send_telegram("🧠 주말 AI 자율 진화 모드 시작: 코스피/코스닥 거래대금 최상위 200대 주도주 차트 빅데이터 딥러닝 훈련에 돌입합니다.")
+        
+        try:
+            import os
+            import sys
+            import subprocess
+            
+            # 현재 가동 중인 가상환경(venv) 내부의 진짜 파이썬 실행 파일 경로 추적
+            python_executable = sys.executable
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            script_path = os.path.join(base_dir, "train_lstm.py")
+            
+            # 💡 [메모리 수호] 훈련 연산 중 램 부족으로 메인 봇이 같이 기절하는 것을 원천 차단코자 독립 서브프로세스로 분리 격리 가동
+            result = subprocess.run([python_executable, script_path], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                self.add_log("✅ [AI 자율 진화 완료] 이번 주 주도주 200개 기반 LSTM 가중치 모델 파일(.pth) 자동 갱신 완료!")
+                self._send_telegram("🎉 [AI 자율 진화 완료] 이번 주 시장을 지배한 상위 200개 주식의 파동 패턴 완전 마스터 및 AI 매매 신경망 교체 성공!")
+            else:
+                self.add_log(f"❌ [AI 자율 진화 실패] train_lstm.py 학습 도중 오류가 검출되었습니다:\n{result.stderr}")
+                self._send_telegram("⚠️ [AI 자율 진화 실패] 주말 딥러닝 자율 학습 도중 에러가 발견되었습니다. (로그 확인 필요)")
+        except Exception as e:
+            self.add_log(f"❌ [AI 자율 진화 오류] 서브 프로세스 통제 장치 장애: {e}")
 
 class BotManager:
     def __init__(self):
