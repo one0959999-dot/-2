@@ -41,12 +41,16 @@ def get_recent_prices(ticker, kis_api=None, days=30):
     return df['close'].dropna().tail(days)
 
 
-def get_rsi_signal(ticker, kis_api=None):
+def get_rsi_signal(ticker, kis_api=None, df=None):
     """
-    RSI(9) 기반 현재 매매 신호 반환 (떨어지는 칼날 방지 로직 적용)
+    RSI(9) 기반 현재 매매 신호 반환 (떨어지는 칼날 방지 및 캐시 데이터프레임 우선 연동)
     Returns: ('BUY' | 'SELL' | 'HOLD', current_price, rsi_value)
     """
-    prices = get_recent_prices(ticker, kis_api, days=30)
+    if df is not None and not df.empty:
+        prices = df['close'].dropna().tail(30)
+    else:
+        prices = get_recent_prices(ticker, kis_api, days=30)
+        
     if len(prices) < RSI_PERIOD + 2:
         return 'HOLD', 0, 0
 
@@ -55,27 +59,27 @@ def get_rsi_signal(ticker, kis_api=None):
     prev_rsi    = rsi_series.iloc[-2]
     price       = int(prices.iloc[-1])
 
-    # 🟢 [수정됨] 무릎 매수: 이전엔 30 밑이었는데, 지금 30을 위로 돌파(골든크로스)할 때만 매수
+    # 🟢 무릎 매수: 이전엔 30 밑이었는데, 지금 30을 위로 돌파(골든크로스)할 때만 매수
     if prev_rsi < RSI_OVERSOLD and current_rsi >= RSI_OVERSOLD:
         return 'BUY', price, current_rsi
-    # 🔴 [수정됨] 어깨 매도: 이전엔 70 위였는데, 지금 70을 아래로 깰(데드크로스) 때만 매도
+    # 🔴 어깨 매도: 이전엔 70 위였는데, 지금 70을 아래로 깰(데드크로스) 때만 매도
     elif prev_rsi > RSI_OVERBOUGHT and current_rsi <= RSI_OVERBOUGHT:
         return 'SELL', price, current_rsi
 
-    # (기존에 있던 맹목적 과매도 진입 로직 삭제 완료)
     return 'HOLD', price, current_rsi
 
 
-def get_signal_by_strategy(ticker, strategy_name, kis_api=None):
+def get_signal_by_strategy(ticker, strategy_name, kis_api=None, df=None):
     """
-    전략 이름에 따라 실시간 매매 신호 생성 (KIS API 연동)
+    전략 이름에 따라 실시간 매매 신호 생성 (로컬 패치 캐시 및 KIS 하이브리드 지원)
     Returns: ('BUY' | 'SELL' | 'HOLD', price, indicator_value)
     """
-    if kis_api is None:
+    if kis_api is None and df is None:
         return 'HOLD', 0, 0
 
-    # pykrx 대신 KIS API의 get_ohlcv를 사용하여 과거 100일치 데이터를 가져옵니다.
-    df = kis_api.get_ohlcv(ticker, "D")
+    # 주입된 캐시 장부가 없다면 백업용으로 KIS API 직접 호출
+    if df is None or df.empty:
+        df = kis_api.get_ohlcv(ticker, "D")
     
     if df.empty or 'close' not in df.columns:
         return 'HOLD', 0, 0
@@ -107,11 +111,8 @@ def get_signal_by_strategy(ticker, strategy_name, kis_api=None):
     def _thresh(ind, lo, hi):
         """임계값 돌파(반등/꺾임) 확인 로직"""
         cur, prev = ind.iloc[-1], ind.iloc[-2]
-        # 🟢 하단 돌파(골든크로스) 시에만 매수
         if prev < lo and cur >= lo: return 'BUY', cur
-        # 🔴 상단 이탈(데드크로스) 시에만 매도
         if prev > hi and cur <= hi: return 'SELL', cur
-        # (기존에 있던 맹목적 과매도/과매수 묻지마 진입 로직 삭제 완료)
         return 'HOLD', cur
 
     try:
@@ -139,7 +140,6 @@ def get_signal_by_strategy(ticker, strategy_name, kis_api=None):
             m = _ema(c, 12) - _ema(c, 26); ms = _ema(m, 9)
             return _cross(m, ms), price, m.iloc[-1]
         elif "볼린저" in sn:
-            # 🛠️ [버그 완벽 수정] 하단/상단 밴드의 현재값과 직전값을 정확히 인덱싱하여 바인딩
             mid = _sma(c, 20); sd = c.rolling(20).std()
             lower = mid - (2 * sd)
             upper = mid + (2 * sd)
@@ -148,8 +148,8 @@ def get_signal_by_strategy(ticker, strategy_name, kis_api=None):
             prev_l, cur_l = lower.iloc[-2], lower.iloc[-1]
             prev_u, cur_u = upper.iloc[-2], upper.iloc[-1]
             
-            if prev_c < prev_l and cur_c >= cur_l: return 'BUY', price, cur_c # 하단 반등
-            if prev_c > prev_u and cur_c <= cur_u: return 'SELL', price, cur_c # 상단 이탈
+            if prev_c < prev_l and cur_c >= cur_l: return 'BUY', price, cur_c 
+            if prev_c > prev_u and cur_c <= cur_u: return 'SELL', price, cur_c 
             return 'HOLD', price, cur_c
         elif "Stochastic" in sn:
             lo_r = l.rolling(14).min(); hi_r = h.rolling(14).max()
@@ -159,17 +159,16 @@ def get_signal_by_strategy(ticker, strategy_name, kis_api=None):
             tp = (h+l+c)/3; ma = _sma(tp, 20)
             md = tp.rolling(20).apply(lambda x: np.mean(np.abs(x-x.mean())), raw=True)
             cci_v = (tp-ma)/(0.015*md+1e-10)
-            sig, val = _thresh(cci_v, -100, 100) # -100 돌파시 매수, 100 이탈시 매도 (정상)
+            sig, val = _thresh(cci_v, -100, 100)
             return sig, price, val
         elif "Williams" in sn:
             wr = -100*(h.rolling(14).max()-c)/(h.rolling(14).max()-l.rolling(14).min()+1e-10)
-            sig, val = _thresh(wr, -80, -20) # -80 돌파시 매수, -20 이탈시 매도 (정상)
+            sig, val = _thresh(wr, -80, -20)
             return sig, price, val
         else:
-            return get_rsi_signal(ticker)  # fallback
+            return get_rsi_signal(ticker, df=df)
     except Exception as e:
         return 'HOLD', price, 0
-
 
 class Position:
     """개별 종목 포지션 상태 관리"""
