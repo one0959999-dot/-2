@@ -1398,3 +1398,62 @@ body.theme-warm-beige #strat-desc {
     color: #334155 !important;
     -webkit-text-fill-color: #334155 !important;
 }
+
+/* ==========================================================================
+   ⚙️ [라씨 AI 채팅창] 모의투자 모드(라이트 테마) 독점 가독성 극대화 패치
+   ========================================================================== */
+
+/* 1. AI 응답 말풍선 내부의 모든 텍스트(리스트, 강조 포함) 진한 네이비 블랙으로 동기화 */
+body.theme-warm-beige .chat-msg.ai .chat-bubble {
+    background: #f1f5f9 !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+}
+
+body.theme-warm-beige .chat-msg.ai .chat-bubble * {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+}
+
+body.theme-warm-beige .chat-msg.ai .chat-bubble strong {
+    color: #4f46e5 !important;
+    -webkit-text-fill-color: #4f46e5 !important;
+    font-weight: 700 !important;
+}
+
+/* 2. 사용자(User) 말풍선 내부 글자색 강제 방어 (검은색으로 변질되는 현상 차단) */
+body.theme-warm-beige .chat-msg.user .chat-bubble {
+    background: linear-gradient(135deg, #4f46e5, #7c3aed) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2) !important;
+}
+
+body.theme-warm-beige .chat-msg.user .chat-bubble * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+/* 3. 질문 입력창(Textarea) 화이트아웃 버그 수정: 배경을 흰색으로 고정하고 글자색을 어둡게 변경 */
+body.theme-warm-beige #ai-chat-input {
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+}
+
+body.theme-warm-beige #ai-chat-input::placeholder {
+    color: #94a3b8 !important;
+}
+
+/* 4. 하단 질문 추천 칩(Chips) 디자인을 화이트 톤 매칭 레이아웃으로 변경 */
+body.theme-warm-beige .chat-chip {
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #4f46e5 !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+
+body.theme-warm-beige .chat-chip:hover {
+    background: #eef2ff !important;
+    border-color: #4f46e5 !important;
+    color: #4f46e5 !important;
+}

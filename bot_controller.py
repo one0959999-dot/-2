@@ -484,12 +484,15 @@ class BotController:
             today_str = datetime.now().strftime('%Y-%m-%d')
             
             if restored_report:
-                if restored_report.get('date') == today_str or datetime.now().weekday() >= 5:
-                    self.daily_report = restored_report
-                    if datetime.now().weekday() >= 5:
-                        self.add_log(f"📋 장 휴무일(주말)이므로 직전 거래일 분석 리포트({restored_report.get('date')})를 화면에 유지합니다.")
+                # 💡 [기능 수정] 평일 오전 11시 전 오늘 자 리포트가 생성되기 전이라도 데이터가 None으로 초기화되는 현상을 방지합니다.
+                # 모의/실전 구분 없이 전날(직전 거래일) 리포트를 안전하게 보존하여 화면에 연동합니다.
+                self.daily_report = restored_report
+                if restored_report.get('date') == today_str:
+                    pass
+                elif datetime.now().weekday() >= 5:
+                    self.add_log(f"📋 장 휴무일(주말)이므로 직전 거래일 분석 리포트({restored_report.get('date')})를 화면에 유지합니다.")
                 else:
-                    self.daily_report = None  
+                    self.add_log(f"📋 오늘 자 리포트 생성 전이므로, 전날(이전 거래일) 분석 리포트({restored_report.get('date')})를 화면에 임시 노출합니다.")
             else:
                 self.daily_report = None
             
