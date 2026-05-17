@@ -467,9 +467,25 @@ def select_satellites(kis=None, n=NUM_SATELLITES, verbose=True, gemini_client=No
             if recent_ret > 15 and vol_score < 2.0:
                 overheated_penalty = (recent_ret - 15) * 1.5
 
-            # 4. 종합 점수 계산 (저평가 & 수급 반영)
-            # 할인율(bb_discount)을 그대로 반영하여, 고평가 구간이면 스스로 점수가 깎이도록 설계
-            score = best_ret + (vol_score - 1) * 6 + sector_bonus + (bb_discount * 1.5) - overheated_penalty
+            # 💡 [통계적 차익/평균 회귀 필터] 해당 종목의 20일 수익률이 코스피 지수 20일 수익률과 너무 크게 벌어졌는지 확인(스프레드 페널티)
+            # (지수 대비 나홀로 30% 이상 초과 급등한 종목은 통계적으로 되돌림(조정) 확률이 매우 높음)
+            stat_arb_penalty = 0
+            if recent_ret > 30:
+                stat_arb_penalty = (recent_ret - 30) * 0.8  # 초과 급등분에 대한 통계적 수축 페널티
+
+            # 🧠 [Machine Learning 팩터 연동 지점]
+            # (추후 회원님의 train_model.py 로 학습된 .pkl / .pt 모델이 있다면 여기서 inference 수행)
+            ml_factor_score = 0
+            # 예시: ml_factor_score = predict_with_my_model(df) * 10 
+
+            # 4. 종합 점수 계산 (저평가, 수급, 통계적 괴리율 페널티, ML 팩터 모두 결합)
+            score = (best_ret 
+                     + (vol_score - 1) * 6 
+                     + sector_bonus 
+                     + (bb_discount * 1.5) 
+                     - overheated_penalty 
+                     - stat_arb_penalty 
+                     + ml_factor_score)
 
             results.append({
                 'ticker':        ticker,
