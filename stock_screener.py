@@ -431,7 +431,8 @@ def select_satellites(kis=None, n=NUM_SATELLITES, verbose=True, gemini_client=No
     for ticker in candidate_pool:
         try:
             name = stock.get_market_ticker_name(ticker)
-            df   = fetch_ohlcv(ticker, days=BACKTEST_DAYS)
+            # 🟢 fetch_ohlcv 뒤에 ', kis=kis' 를 추가하여 정식 API를 타도록 강제합니다.
+            df   = fetch_ohlcv(ticker, days=BACKTEST_DAYS, kis=kis) 
             if len(df) < 40 or 'close' not in df.columns:
                 continue
 

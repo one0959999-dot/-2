@@ -530,7 +530,7 @@ class BotController:
             # KOSPI 지수 대용인 KODEX 200(069500) ETF를 통해 바닥 반등 여부 확인
             if self.kis:
                 # 💡 실시간 웹소켓 메모리에 들어온 0.1초 전 가격을 즉시 사용 (딜레이 0, 차단 위험 0)
-                kospi_cp = self.live_prices.get("069500")
+                kospi_cp = self.kis.get_current_price("069500")
                 if kospi_cp:
                     extended_df = self._get_extended_ohlcv("069500", kospi_cp)
                     if not extended_df.empty and len(extended_df) >= 5:
