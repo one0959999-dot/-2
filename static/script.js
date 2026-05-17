@@ -20,10 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
         empty.style.display = 'none';
 
         const colors = values.map(v =>
-            v >= 0 ? 'rgba(63,185,80,0.75)' : 'rgba(248,81,73,0.75)'
+            v >= 0 ? 'rgba(248,81,73,0.75)' : 'rgba(88,166,255,0.75)'
         );
         const borderColors = values.map(v =>
-            v >= 0 ? 'rgba(63,185,80,1)' : 'rgba(248,81,73,1)'
+            v >= 0 ? 'rgba(248,81,73,1)' : 'rgba(88,166,255,1)'
         );
 
         if (pnlChart) {
@@ -129,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
                 const formatPnl = (val) => (val >= 0 ? '+' : '') + val.toLocaleString() + '원';
-                const colorPnl = (val) => val >= 0 ? '#3fb950' : '#f85149';
+                const colorPnl = (val) => val >= 0 ? '#f85149' : '#58a6ff';
 
                 const elMonth = document.getElementById('chart-monthly-pnl');
                 const elYear = document.getElementById('chart-yearly-pnl');
