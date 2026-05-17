@@ -163,22 +163,46 @@ def get_daily_report():
     today_str = datetime.today().strftime('%Y-%m-%d')
     weekday = datetime.today().weekday()
     
-    # 1. 오늘 날짜로 생성된 리포트가 존재하면 즉시 반환
+    # 1. 오늘 날짜로 생성된 리포트가 존재하면 가공 후 즉시 반환
     if bot.daily_report and bot.daily_report.get('date') == today_str:
-        return jsonify({"status": "success", "data": bot.daily_report})
+        report_data = bot.daily_report
+        if isinstance(report_data, dict):
+            content = report_data.get('report_markdown') or report_data.get('content') or report_data.get('summary') or "리포트 내용 텍스트가 비어있습니다."
+            date_str = report_data.get('date', today_str)
+        else:
+            content = str(report_data)
+            date_str = today_str
+        return jsonify({
+            "status": "success",
+            "data": {
+                "date": date_str,
+                "report_markdown": content
+            }
+        })
     
     # 2. 토요일(5) 또는 일요일(6) 등 주말/휴일장인 경우의 예외 처리
     if weekday >= 5:
         if bot.daily_report:
-            # 전날(금요일 등) 작성된 리포트가 있다면 리턴
-            return jsonify({"status": "success", "data": bot.daily_report})
+            report_data = bot.daily_report
+            if isinstance(report_data, dict):
+                content = report_data.get('report_markdown') or report_data.get('content') or report_data.get('summary') or "리포트 내용 텍스트가 비어있습니다."
+                date_str = report_data.get('date', today_str)
+            else:
+                content = str(report_data)
+                date_str = today_str
+            return jsonify({
+                "status": "success",
+                "data": {
+                    "date": date_str,
+                    "report_markdown": content
+                }
+            })
         else:
-            # 작성된 리포트가 아예 없다면 지정된 휴일 안내 멘트 리턴
             return jsonify({
                 "status": "success",
                 "data": {
                     "date": today_str,
-                    "report_markdown": "### 📢 알림\n\n금일은 휴일장입니다."
+                    "report_markdown": "### 📢 알림\n\n금일은 장 휴무일(주말)입니다. 직전 거래일에 기록된 분석 리포트 장부가 비어있습니다."
                 }
             })
             
@@ -396,22 +420,35 @@ def set_keys():
 @app.route('/api/search/stock')
 @login_required
 def search_stock():
-    """웹 대시보드에서 코어 종목을 검색할 때 KIS API 또는 네이버를 통해 종목 코드를 찾아줍니다."""
-    q = request.args.get('q', '').strip()
-    if not q:
-        return jsonify({"results": []})
-        
-    bot = get_current_bot()
-    # 봇 객체나 KIS 연동 객체가 없으면 빈 리스트 반환
-    if not bot or not bot.kis:
+    """웹 대시보드에서 코어 종목을 검색할 때 로컬 상장 데이터베이스에서 초고속으로 매칭해 줍니다."""
+    query = request.args.get('q', '').strip()
+    if not query:
         return jsonify({"results": []})
         
     try:
-        # kis_api.py에 있는 search_stock_name 함수 호출
-        results = bot.kis.search_stock_name(q)
+        from pykrx import stock as krx_stock
+        results = []
+        
+        # 유가증권시장(KOSPI)과 코스닥(KOSDAQ) 시장에 상장된 전체 종목코드 셋을 즉시 로드
+        tickers = krx_stock.get_market_ticker_list(market="ALL")
+        
+        for ticker in tickers:
+            name = krx_stock.get_market_ticker_name(ticker)
+            
+            # 유저 검색어가 6자리 종목코드 번호에 포함되거나 종목명 이름에 포함되는 경우 (대소문자 완전 무시)
+            if query in ticker or query.lower() in name.lower():
+                results.append({
+                    "ticker": ticker,
+                    "name": name
+                })
+                
+                # 검색 결과가 너무 많을 경우 성능 저하를 방지하기 위해 상위 30개로 표기 한계점 차단
+                if len(results) >= 30:
+                    break
+                    
         return jsonify({"results": results})
     except Exception as e:
-        print(f"⚠️ 종목 검색 오류: {e}")
+        print(f"⚠️ 로컬 주식 통합 데이터셋 검색 중 시스템 예외 발생: {e}")
         return jsonify({"results": []})
 
 if __name__ == '__main__':
