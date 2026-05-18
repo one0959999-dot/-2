@@ -47,7 +47,10 @@ class KisApi:
 
     def get_approval_key(self):
         """웹소켓 실시간 접속을 위한 웹소켓용 Approval Key 발급"""
-        url = f"{self.base_url}/oauth2/Approval"
+        # 🚨 [치명적 버그 수정]: Approval Key 발급은 모의투자 모드일지라도 '무조건' 실전 도메인을 사용해야 합니다.
+        real_url = "https://openapi.koreainvestment.com:9443"
+        url = f"{real_url}/oauth2/Approval"
+        
         headers = {"content-type": "application/json; charset=utf-8"}
         body = {
             "grant_type": "client_credentials",
