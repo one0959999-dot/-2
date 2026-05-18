@@ -378,7 +378,11 @@ class KisApi:
                 "r_lt": "111"
             }
             
-            res = requests.get(url, params=params, timeout=3)
+            # 🟢 [추가된 코드] 네이버의 봇 차단 방화벽을 무사통과하기 위해 일반 웹 브라우저(크롬)인 것처럼 헤더를 추가합니다.
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            
+            # 🟢 [수정된 부분] 요청을 보낼 때 headers=headers 파라미터를 함께 넘겨줍니다.
+            res = requests.get(url, params=params, headers=headers, timeout=3)
             if res.status_code == 200:
                 data = res.json()
                 if "items" in data and data["items"] and data["items"][0]:
