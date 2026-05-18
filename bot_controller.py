@@ -561,13 +561,14 @@ class BotController:
             return
 
         current_time_str = now.strftime('%H:%M')
-        is_golden_hours = ("09:01" <= current_time_str <= "11:00") or ("15:00" <= current_time_str <= "15:20")
+        # 🟢 [족쇄 파괴 1] 11시~15시 사이의 휴식 제한을 없애고 09:01 ~ 15:20 장중 내내 풀가동!
+        is_golden_hours = ("09:01" <= current_time_str <= "15:20")
         
         if not is_golden_hours:
             if now.minute % 30 == 0:
-                self.add_log(f"🕒 현재 시간({current_time_str}) 횡보 구간입니다. 신규 매수는 중지하되 리스크 관리는 유지합니다.")
+                self.add_log(f"🕒 현재 시간({current_time_str}) 장 마감 또는 휴식 구간입니다.")
         else:
-            self.add_log(f"--- 🎯 골든 타임 매수/매도 전면 점검 ({current_time_str}) ---")
+            self.add_log(f"--- 🎯 실시간 매수/매도 전면 점검 ({current_time_str}) ---")
 
         # 🦅 [신규 알파 로직] 관망 및 저점 탐색 모드 (Crisis Mode) 체크
         if getattr(self, 'is_crisis_mode', False):
@@ -1247,7 +1248,9 @@ class BotController:
 
         self.trading_job()  
         
-        if getattr(self, 'last_screen_date', None) != datetime.now().date():
+        # 🟢 [족쇄 파괴 2] 오늘 이미 스캔을 했더라도, 봇을 켰을 때 현금이 놀고 있는 빈자리가 있다면 즉시 스캔해서 채워 넣습니다!
+        needs_rescreen = len(self.satellite_positions) < self.num_satellites or any(p.shares == 0 for p in self.satellite_positions.values())
+        if getattr(self, 'last_screen_date', None) != datetime.now().date() or needs_rescreen:
             now_time_str = datetime.now().strftime('%H:%M')
             if "09:00" <= now_time_str <= "15:30": self._rescreen_satellites()
 
