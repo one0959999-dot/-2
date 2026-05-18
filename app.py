@@ -443,12 +443,18 @@ def search_stock():
         return jsonify({"results": []})
         
     try:
-        # 현재 로그인된 사용자의 실전/모의 봇 인스턴스를 가져옵니다.
         bot = get_current_bot()
+        
+        # 🟢 [버그 해결 핵심] 아직 사용자가 KIS API 키를 등록하지 않아서 bot.kis가 비어있더라도, 
+        # 네이버 금융 검색은 키 없이 작동하므로 임시 객체를 생성해서 무조건 검색을 수행하도록 빗장을 풉니다.
         if bot and bot.kis:
-            # kis_api.py 내부에 개발자님이 이미 완벽하게 구축해 두신 무적 네이버 검색망 호출!
             results = bot.kis.search_stock_name(query)
-            return jsonify({"results": results})
+        else:
+            from kis_api import KisApi
+            temp_kis = KisApi("", "", "") # 빈 키워드로 임시 우회 객체 생성
+            results = temp_kis.search_stock_name(query)
+            
+        return jsonify({"results": results})
             
     except Exception as e:
         print(f"⚠️ 코어 종목 실시간 검색 중 예외 발생: {e}")
