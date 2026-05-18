@@ -45,7 +45,9 @@ def init_db():
             ('real_app_key', 'TEXT'), ('real_app_secret', 'TEXT'), ('real_account_no', 'TEXT'),
             ('mock_app_key', 'TEXT'), ('mock_app_secret', 'TEXT'), ('mock_account_no', 'TEXT'),
             ('gemini_api_key', 'TEXT'), ('is_running', 'INTEGER DEFAULT 0'), 
-            ('core_stocks', 'TEXT'), ('is_mock', 'INTEGER DEFAULT 1')
+            ('core_stocks', 'TEXT'), ('is_mock', 'INTEGER DEFAULT 1'),
+            # 🟢 [장부 분리] 실전과 모의 원금을 각각 따로 저장하도록 2개의 기둥을 세웁니다.
+            ('real_initial_cash', 'REAL DEFAULT 10000000'), ('mock_initial_cash', 'REAL DEFAULT 10000000')
         ]
         for col_name, col_type in new_columns:
             try:

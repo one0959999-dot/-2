@@ -195,7 +195,9 @@ class BotController:
                 if not getattr(self, 'initial_capital_captured', False) and total_equity > 0:
                     from database import get_db_connection
                     conn = get_db_connection()
-                    conn.execute('UPDATE users SET initial_cash = ? WHERE id = ?', (total_equity, self.user_id))
+                    # 🟢 각 봇의 신분에 맞는 전용 장부 칸을 찾아냅니다.
+                    cash_col = "mock_initial_cash" if self._is_mock else "real_initial_cash"
+                    conn.execute(f'UPDATE users SET {cash_col} = ? WHERE id = ?', (total_equity, self.user_id))
                     conn.commit()
                     conn.close()
                     self.initial_capital_captured = True  # 오늘 장 가동 중 중복 스냅샷 방지 플래그 선언
@@ -215,7 +217,9 @@ class BotController:
                         if deposit_delta > 10000 or deposit_delta < -10000: # 1만원 이상 변동 시 입출금으로 간주 (수수료 오차 제외)
                             from database import get_db_connection
                             conn = get_db_connection()
-                            conn.execute('UPDATE users SET initial_cash = initial_cash + ? WHERE id = ?', (deposit_delta, self.user_id))
+                            # 🟢 입출금 추적도 각자의 장부에서만 덧셈 뺄셈을 합니다.
+                            cash_col = "mock_initial_cash" if self._is_mock else "real_initial_cash"
+                            conn.execute(f'UPDATE users SET {cash_col} = {cash_col} + ? WHERE id = ?', (deposit_delta, self.user_id))
                             conn.commit()
                             conn.close()
                             
@@ -1398,9 +1402,11 @@ class BotController:
         # 🚨 [UI 덮어쓰기 방지] DB에서 가장 최신화된 원금을 직접 꺼내서 웹 화면으로 쏴줍니다.
         from database import get_db_connection
         conn = get_db_connection()
-        row = conn.execute('SELECT initial_cash FROM users WHERE id = ?', (self.user_id,)).fetchone()
+        # 🟢 현재 웹 화면에 켜진 모드에 맞춰서 올바른 장부 데이터를 꺼내옵니다.
+        cash_col = "mock_initial_cash" if self._is_mock else "real_initial_cash"
+        row = conn.execute(f'SELECT {cash_col} FROM users WHERE id = ?', (self.user_id,)).fetchone()
         conn.close()
-        current_initial_cash = float(row['initial_cash']) if row else 10000000
+        current_initial_cash = float(row[cash_col]) if row and row[cash_col] is not None else 10000000
 
         return {
             "is_running": self.is_running, "is_mock": self._is_mock, "has_keys": self.kis is not None,
