@@ -1388,7 +1388,8 @@ class BotController:
 
         cores_data = []
         for core in safe_core_positions:
-            cp = getattr(core, '_last_price', 0) or 0
+            # 🚨 [백업 오차 패치] 엔진이 미처 연산하기 전이면 웹소켓 실시간 가격 및 평단가를 순차 백업으로 활용
+            cp = getattr(core, '_last_price', 0) or self.live_prices.get(core.ticker, 0) or core.avg_price or 0
             cores_data.append({
                 "name": core.name, "ticker": core.ticker, "shares": core.shares,
                 "floor": core.floor_shares, "price": cp, "value": core.shares * cp,
@@ -1397,7 +1398,8 @@ class BotController:
 
         satellites = []
         for ticker, pos in safe_satellite_items:
-            sp = getattr(pos, '_last_price', 0) or 0
+            # 🚨 [백업 오차 패치] 엔진이 미처 연산하기 전이면 웹소켓 실시간 가격 및 평단가를 순차 백업으로 활용
+            sp = getattr(pos, '_last_price', 0) or self.live_prices.get(ticker, 0) or pos.avg_price or 0
             satellites.append({
                 "name": pos.name, "ticker": ticker, "strategy": self.satellite_strategies.get(ticker, '-'),
                 "shares": pos.shares, "price": sp, "value": pos.shares * sp,
