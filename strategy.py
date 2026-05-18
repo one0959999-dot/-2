@@ -195,6 +195,10 @@ class Position:
         # 한국 금융시장 표준 수수료 및 거래세율 정의
         self.fee_rate = 0.00015      # 실전 및 모의 온라인 매매 수수료 기본율 (0.015%)
         self.tax_rate = 0.0018       # 장내 매도 시 국가 증권거래세율 (0.18%)
+        
+        # 🟢 [신규 추가] 상태 뱃지 및 메시지 초기화
+        self.status = "감시 중 👀"
+        self.status_msg = "현재 지정된 전략에 따라 차트 및 지표를 실시간 감시하고 있습니다."
 
     def buy(self, price, all_in=True):
         if self.shares > 0 or self.cash < price:
@@ -263,6 +267,10 @@ class CorePosition:
         
         self.fee_rate = 0.00015   # 수수료율 (0.015%)
         self.tax_rate = 0.0018    # 거래세율 (0.18%)
+        
+        # 🟢 [신규 추가] 상태 뱃지 및 메시지 초기화
+        self.status = "감시 중 👀"
+        self.status_msg = "현재 지정된 전략에 따라 차트 및 지표를 실시간 감시하고 있습니다."
 
     def buy(self, price, cash_to_use=None):
         """매수 (cash_to_use 미지정 시 전액 매수)"""

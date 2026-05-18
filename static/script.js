@@ -247,6 +247,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // (이 윗부분의 initChart 등은 그대로 둡니다)
+
+    // 🟢 [신규 추가] 팝업창(모달)을 띄우는 함수
+    window.showStatusModal = function (name, message) {
+        document.getElementById('modalTickerName').innerText = `[${name}] 진행 상황`;
+        document.getElementById('modalStatusMsg').innerText = message;
+        document.getElementById('statusModal').style.display = 'flex';
+    }
+
     // ── Main UI Update ──
     function updateUI(data) {
         // 🚨 [UI 덮어쓰기 방지] 백엔드에서 갱신한 최신 원금을 실시간으로 자바스크립트 변수와 설정창 입력칸에 동기화
@@ -381,14 +390,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         cores.forEach((core) => {
             totalCoreValue += (core.value || 0);
+
+            // 🟢 코어 종목 뱃지 스타일 동적 생성
+            const sText = core.status || "감시 중 👀";
+            const sMsg = core.status_msg || "지표 점검 중...";
+            let badgeStyle = "background:rgba(255,255,255,0.1); color:#94a3b8; border:1px solid rgba(255,255,255,0.2);";
+            if (sText.includes('AI') || sText.includes('심사')) badgeStyle = "background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4); animation:pulse 2s infinite;";
+            if (sText.includes('주문') || sText.includes('대기')) badgeStyle = "background:rgba(245,158,11,0.2); color:#fcd34d; border:1px solid rgba(245,158,11,0.4); animation:pulse 2s infinite;";
+            if (sText.includes('거절') || sText.includes('손절') || sText.includes('청산')) badgeStyle = "background:rgba(239,68,68,0.2); color:#fca5a5; border:1px solid rgba(239,68,68,0.4);";
+
             const div = document.createElement('div');
-            // CSS 테마 클래스에 의해 코어 카드의 색상도 일괄 자동 변경됩니다.
             div.className = 'info-card glass-card core-card';
             div.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <h3 style="margin: 0;">
-                        💎 ${core.name} (Core) 
-                        ${!core.shares ? '<span style="font-size:0.75rem; color:#f59e0b; background:rgba(245, 158, 11, 0.2); padding:2px 6px; border-radius:4px; margin-left:6px; vertical-align:middle;">[편입 예정]</span>' : ''}
+                    <h3 style="margin: 0; display:flex; align-items:center; gap:8px;">
+                        💎 ${core.name} (Core)
+                        <span onclick="showStatusModal('${core.name}', '${sMsg.replace(/'/g, "\\'")}')" class="badge" style="cursor:pointer; ${badgeStyle}">${sText}</span>
                     </h3>
                     <button onclick="openCoreModal()" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:1.1rem;" title="코어 설정 변경">⚙️</button>
                 </div>
@@ -408,16 +425,24 @@ document.addEventListener('DOMContentLoaded', () => {
             let satHtmlBuffer = '';
             sats.forEach(s => {
                 const isHolding = s.shares > 0;
-                const statusBadge = isHolding
-                    ? `<span class="badge badge-holding">보유중</span>`
-                    : `<span class="badge" style="background:rgba(245,158,11,0.2);color:#f59e0b;border:1px solid rgba(245,158,11,0.4);">구매 예정</span>`;
+
+                // 🟢 위성 종목 상태 뱃지 동적 생성
+                const sText = s.status || "감시 중 👀";
+                const sMsg = s.status_msg || "지표 점검 중...";
+                let badgeStyle = "background:rgba(255,255,255,0.1); color:#94a3b8; border:1px solid rgba(255,255,255,0.2);";
+                if (sText.includes('AI') || sText.includes('심사')) badgeStyle = "background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(168,85,247,0.4); animation:pulse 2s infinite;";
+                if (sText.includes('주문') || sText.includes('대기')) badgeStyle = "background:rgba(245,158,11,0.2); color:#fcd34d; border:1px solid rgba(245,158,11,0.4); animation:pulse 2s infinite;";
+                if (sText.includes('거절') || sText.includes('손절') || sText.includes('청산') || sText.includes('보류')) badgeStyle = "background:rgba(239,68,68,0.2); color:#fca5a5; border:1px solid rgba(239,68,68,0.4);";
+
+                const statusBadge = `<span class="badge" onclick="showStatusModal('${s.name}', '${sMsg.replace(/'/g, "\\'")}')" style="cursor:pointer; ${badgeStyle}">${sText}</span>`;
+
                 const stratBadge = s.strategy
                     ? `<span class="badge badge-strategy" style="cursor:pointer;" onclick="showStrategyInfo('${s.strategy}')" title="클릭하여 전략 상세 설명 보기">${s.strategy}</span>`
                     : '<span style="color:#8b949e">-</span>';
                 const sharesCell = isHolding ? `${s.shares.toLocaleString()}주` : `<span style="color:#64748b">-</span>`;
                 const valueCell = isHolding ? `${(s.value || 0).toLocaleString()}원` : `<span style="color:#64748b">-</span>`;
 
-                // 🟢 [신규 추가] 백엔드에서 전달받은 최고가(max_price)를 포맷팅합니다.
+                // 백엔드에서 전달받은 최고가(max_price) 포맷팅
                 const maxPriceStr = (s.max_price && s.max_price > 0) ? `${s.max_price.toLocaleString()}원` : '갱신 대기';
 
                 satHtmlBuffer += `

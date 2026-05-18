@@ -591,14 +591,14 @@ class BotController:
         if not is_golden_hours:
             if now.minute % 30 == 0:
                 self.add_log(f"🕒 현재 시간({current_time_str}) 장 마감 또는 휴식 구간입니다.")
-                # 🟢 장 외 시간 돌입 시 뱃지 상태를 즉시 휴식 중으로 일괄 변경
-                with self.lock:
-                    for core in self.core_positions:
-                        core.status = "휴식 중 💤"
-                        core.status_msg = f"현재 시간({current_time_str})은 정규 장 및 장외 대체거래소 감시 마감 시간입니다."
-                    for sat in self.satellite_positions.values():
-                        sat.status = "휴식 중 💤"
-                        sat.status_msg = f"현재 시간({current_time_str})은 정규 장 및 장외 대체거래소 감시 마감 시간입니다."
+            # 🟢 장 외 시간 돌입 시 뱃지 상태를 즉시 휴식 중으로 일괄 변경
+            with self.lock:
+                for core in self.core_positions:
+                    core.status = "휴식 중 💤"
+                    core.status_msg = f"현재 시간({current_time_str})은 정규 장 및 장외 대체거래소 감시 마감 시간입니다."
+                for sat in self.satellite_positions.values():
+                    sat.status = "휴식 중 💤"
+                    sat.status_msg = f"현재 시간({current_time_str})은 정규 장 및 장외 대체거래소 감시 마감 시간입니다."
         else:
             self.add_log(f"--- 🎯 실시간 매수/매도 전면 점검 ({current_time_str}) ---")
             # 🟢 사이클 매 주기 시작 시 기본 감시 상태로 리셋
@@ -934,6 +934,7 @@ class BotController:
                                     with self.lock:
                                         pos.last_order_time = time.time()  
                                         pos.status = "체결 대기 ⏳"
+                                        pos.status_msg = "매수 주문이 한국투자증권 인프라에 접수되었습니다. 체결 처리를 대기하고 있습니다."
                                     
                                     msg = f"📈 [{pos_name}] 알고리즘 즉각 매수 전송 완료 (10분 쿨타임 가동)"
                                     self.add_log(msg)
@@ -996,7 +997,7 @@ class BotController:
                         else:
                             # 🟢 매도 보류 판정 뱃지 전환
                             pos.status = "AI 거절(보유) 🛑"
-                            pos.status_msg = f"지표는 매수 과열이나 AI 연산 결과 추가 랠리 및 모멘텀 지속이 예상되어 매도를 전면 보류(HOLD)합니다. 사유: {ai_reason}"
+                            pos.status_msg = f"지표는 매도 영역이나 AI 연산 결과 추가 모멘텀 지속이 예상되어 매도를 전면 보류(HOLD)합니다. 사유: {ai_reason}"
                             msg = f"🛡️ [{pos_name}] AI 매도 보류 (HOLD)\n👉 {ai_reason}"
                             self.add_log(msg)
                             self._send_telegram(msg)
@@ -1011,6 +1012,7 @@ class BotController:
                                 with self.lock:
                                     pos.last_order_time = time.time()  
                                     pos.status = "체결 대기 ⏳"
+                                    pos.status_msg = "알고리즘 매도 주문 접수 완료. 시장에서 체결 물량이 매칭되기를 기다리는 중입니다."
                                 
                                 profit = (price - pos_avg_price) * pos_shares 
                                 
@@ -1457,7 +1459,8 @@ class BotController:
                 cores_data.append({
                     "name": core.name, "ticker": core.ticker, "shares": core.shares,
                     "floor": core.floor_shares, "price": cp, "value": core_val,
-                    "budget": getattr(core, 'initial_cash', 0), "strategy": "장기 우상향" if core.ticker != CORE_TICKER else "RSI + floor 보호"
+                    "budget": getattr(core, 'initial_cash', 0), "strategy": "장기 우상향" if core.ticker != CORE_TICKER else "RSI + floor 보호",
+                    "status": getattr(core, 'status', '감시 중 👀'), "status_msg": getattr(core, 'status_msg', '지표 점검 중...')
                 })
 
             satellites = []
@@ -1475,7 +1478,8 @@ class BotController:
                 satellites.append({
                     "name": pos.name, "ticker": ticker, "strategy": self.satellite_strategies.get(ticker, '-'),
                     "shares": pos.shares, "price": sp, "value": sat_val,
-                    "budget": getattr(pos, 'initial_cash', getattr(pos, 'budget', 0))
+                    "budget": getattr(pos, 'initial_cash', getattr(pos, 'budget', 0)),
+                    "status": getattr(pos, 'status', '감시 중 👀'), "status_msg": getattr(pos, 'status_msg', '지표 점검 중...')
                 })
 
             if self.cached_balance:
