@@ -107,29 +107,64 @@ def kis_balance():
         if not bot or not bot.kis:
             return jsonify({"status": "error", "message": "API 설정이 필요합니다."})
         
-        # 🟢 [동기화 핵심 로직] 계산 중 에러 방지를 위해 float() 래핑 추가
+        # 🟢 1. 봇 장부에 있는 실시간 웹소켓 가격을 모두 꺼내서 딕셔너리로 준비합니다.
         live_status = bot.get_status()
-        realtime_stock_value = sum(float(c.get('value', 0)) for c in live_status.get('cores', [])) + sum(float(s.get('value', 0)) for s in live_status.get('satellites', []))
-        
-        # 💎 캐시 덮어쓰기 반환
+        rt_prices = {}
+        for c in live_status.get('cores', []):
+            rt_prices[c['ticker']] = float(c.get('price', 0))
+        for s in live_status.get('satellites', []):
+            rt_prices[s['ticker']] = float(s.get('price', 0))
+            
+        def patch_balance(balance_data):
+            patched = dict(balance_data)
+            
+            patched_stocks = []
+            recalc_total_value = 0.0
+            recalc_total_purchase = 0.0
+            
+            # 🟢 2. 실제 계좌 리스트에 있는 모든 종목을 순회하며 실시간 가격표를 강제로 주입합니다.
+            for stock in patched.get('stocks', []):
+                new_stock = dict(stock)
+                ticker = new_stock.get('ticker')
+                shares = float(new_stock.get('shares', 0))
+                purchase_p = float(new_stock.get('purchase_price', 0))
+                
+                # 🚨 [핵심 동기화] 봇의 실시간 가격이 있으면 덮어쓰고, 없으면 기존 증권사 가격 유지
+                current_p = rt_prices.get(ticker, float(new_stock.get('current_price', 0)))
+                
+                new_stock['current_price'] = current_p
+                new_stock['value'] = shares * current_p  # 개별 종목 평가금액 재계산
+                
+                if purchase_p > 0:
+                    new_stock['profit_rt'] = ((current_p / purchase_p) - 1) * 100
+                else:
+                    new_stock['profit_rt'] = 0.0
+                
+                # 재계산된 개별 종목 가치를 총합계에 누적
+                recalc_total_value += new_stock['value']
+                recalc_total_purchase += (shares * purchase_p)
+                patched_stocks.append(new_stock)
+                
+            # 🟢 3. 완벽하게 재계산된 리스트와 총합계를 덮어씌웁니다.
+            patched['stocks'] = patched_stocks
+            patched['total_value'] = recalc_total_value
+            patched['total_purchase'] = recalc_total_purchase
+            return patched
+
+        # 💎 백그라운드 캐시가 있다면 즉시 계산해서 반환
         if bot.cached_balance:
-            patched_balance = dict(bot.cached_balance)
-            patched_balance['total_value'] = realtime_stock_value
-            return jsonify({"status": "success", "data": patched_balance})
+            return jsonify({"status": "success", "data": patch_balance(bot.cached_balance)})
         
-        # 🚨 [계좌 화면 딜레이 원인 완벽 제거] 
+        # 🚨 캐시가 비어있으면 1회 즉시 호출 후 계산
         real_balance = bot.kis.get_account_balance()
         if real_balance:
             bot.cached_balance = real_balance
             bot._sync_internal_balances(real_balance)
-            
-            patched_balance = dict(real_balance)
-            patched_balance['total_value'] = realtime_stock_value 
-            return jsonify({"status": "success", "data": patched_balance})
+            return jsonify({"status": "success", "data": patch_balance(real_balance)})
             
     except Exception as e:
         import traceback
-        print(f"🚨 kis_balance 치명적 에러 방어: {e}")
+        print(f"🚨 kis_balance 동기화 에러 방어: {e}")
         traceback.print_exc()
         
     return jsonify({
