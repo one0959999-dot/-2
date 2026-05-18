@@ -316,6 +316,19 @@ def ai_chat():
     except Exception as e:
         print(f"⚠️ [AI 비서 데이터 바인딩 에러] : {e}")
 
+    # 🟢 [신규 추가] 대화창 AI가 봇의 최근 행동(로그)을 파악할 수 있도록 컨텍스트에 강제 주입
+    try:
+        current_status = bot.get_status()
+        bot_logs = current_status.get('logs', [])
+        if bot_logs:
+            stock_analysis_context += "\n\n[📝 백엔드 자동 매매 시스템 최근 실행 로그 (필독)]\n"
+            # 너무 길어지지 않게 최근 15개의 봇 상태 로그만 주입
+            for log in bot_logs[-15:]:
+                stock_analysis_context += f"- [{log['time']}] {log['message']}\n"
+            stock_analysis_context += "위 로그를 바탕으로 현재 매매 봇이 백엔드에서 무엇을 하고 있는지(대기 중인지, 매수 보류 중인지 등)를 파악하여 답변에 자연스럽게 녹여주세요.\n"
+    except Exception as log_e:
+        print(f"⚠️ [로그 바인딩 에러] : {log_e}")
+
     reply = bot.gemini.chat(
         user_message, 
         portfolio_context=bot.get_status(), 

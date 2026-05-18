@@ -1386,13 +1386,19 @@ class BotController:
             safe_core_positions = list(self.core_positions)
             safe_satellite_items = list(self.satellite_positions.items())
 
+        # 실시간 웹소켓 연동 데이터 통합 연산용 누적 변수 초기화
+        total_realtime_stock_val = 0.0
+
         cores_data = []
         for core in safe_core_positions:
             # 🚨 [백업 오차 패치] 엔진이 미처 연산하기 전이면 웹소켓 실시간 가격 및 평단가를 순차 백업으로 활용
             cp = getattr(core, '_last_price', 0) or self.live_prices.get(core.ticker, 0) or core.avg_price or 0
+            core_val = core.shares * cp
+            total_realtime_stock_val += core_val # 실시간 코어 평가 금액 누적
+            
             cores_data.append({
                 "name": core.name, "ticker": core.ticker, "shares": core.shares,
-                "floor": core.floor_shares, "price": cp, "value": core.shares * cp,
+                "floor": core.floor_shares, "price": cp, "value": core_val,
                 "budget": core.initial_cash, "strategy": "장기 우상향" if core.ticker != CORE_TICKER else "RSI + floor 보호"
             })
 
@@ -1400,15 +1406,19 @@ class BotController:
         for ticker, pos in safe_satellite_items:
             # 🚨 [백업 오차 패치] 엔진이 미처 연산하기 전이면 웹소켓 실시간 가격 및 평단가를 순차 백업으로 활용
             sp = getattr(pos, '_last_price', 0) or self.live_prices.get(ticker, 0) or pos.avg_price or 0
+            sat_val = pos.shares * sp
+            total_realtime_stock_val += sat_val # 실시간 위성 평가 금액 누적
+            
             satellites.append({
                 "name": pos.name, "ticker": ticker, "strategy": self.satellite_strategies.get(ticker, '-'),
-                "shares": pos.shares, "price": sp, "value": pos.shares * sp,
+                "shares": pos.shares, "price": sp, "value": sat_val,
                 "budget": getattr(pos, 'initial_cash', getattr(pos, 'budget', 0))
             })
 
         if self.cached_balance:
             api_cash = float(self.cached_balance.get('total_cash', 0))
-            api_stock_val = float(self.cached_balance.get('total_value', 0))
+            # 🟢 [정밀도 리패치] 증권사 API의 지연된 평가금액 대신 웹소켓 실시간 연산 합계액으로 강제 치환하여 완벽하게 일치시킵니다.
+            api_stock_val = total_realtime_stock_val
             api_purchase = float(self.cached_balance.get('total_purchase', 0))
             mock_total_asset = api_cash + api_stock_val
             mock_pnl = api_stock_val - api_purchase
